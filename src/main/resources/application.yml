@@ -10,9 +10,10 @@ spring:
     name: mailstock-backend
 
   datasource:
-    # Full DB_URL wins; otherwise assembled from parts (Render supplies host/port/name/user/pass
-    # separately via fromDatabase, and blueprints can't string-interpolate a single JDBC URL).
-    url: ${DB_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:mailstock}}
+    # Full DB_URL wins; otherwise assembled from parts (Railway/Render supplies host/port/name/user/pass
+    # separately, and blueprints can't string-interpolate a single JDBC URL).
+    # For Railway/Render: add ?sslmode=require to the URL for SSL support on remote databases.
+    url: ${DB_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:mailstock}?sslmode=${DB_SSL_MODE:disable}}
     username: ${DB_USER:postgres}
     password: ${DB_PASSWORD:root}
     hikari:
