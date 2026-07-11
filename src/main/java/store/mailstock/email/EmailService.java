@@ -1,17 +1,13 @@
 package store.mailstock.email;
 
-import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 @Service
@@ -19,7 +15,7 @@ import java.util.Map;
 @Slf4j
 public class EmailService {
 
-    private final JavaMailSender mailSender;
+    private final ResendClient resendClient;
     private final TemplateEngine templateEngine;
 
     @Value("${app.mail.from}") private String from;
@@ -47,17 +43,13 @@ public class EmailService {
 
     private void send(String to, String subject, String template, Map<String, Object> model) {
         try {
-            MimeMessage msg = mailSender.createMimeMessage();
-            MimeMessageHelper h = new MimeMessageHelper(msg, true, StandardCharsets.UTF_8.name());
             Context ctx = new Context();
             model.forEach(ctx::setVariable);
             String html = templateEngine.process("email/" + template, ctx);
-            h.setFrom(from, fromName);
-            h.setTo(to);
-            h.setSubject(subject);
-            h.setText(html, true);
-            mailSender.send(msg);
-            log.info("Sent '{}' email to {}", template, to);
+            String fromHeader = fromName + " <" + from + ">";
+            if (resendClient.send(fromHeader, to, subject, html)) {
+                log.info("Sent '{}' email to {}", template, to);
+            }
         } catch (Exception e) {
             log.error("Failed sending email to {}: {}", to, e.getMessage(), e);
         }

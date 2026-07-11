@@ -39,26 +39,6 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
 
-  mail:
-    host: ${SMTP_HOST:smtp.kuku.lu}
-    port: ${SMTP_PORT:465}
-    username: ${SMTP_USER:}
-    password: ${SMTP_PASSWORD:}
-    properties:
-      mail:
-        smtp:
-          auth: true
-          # Port 465 = implicit SSL (InstAddr / kuku.lu). Use ssl.enable, NOT starttls.
-          # For port 587 instead, set SMTP_SSL=false, SMTP_STARTTLS=true, SMTP_PORT=587.
-          ssl:
-            enable: ${SMTP_SSL:true}
-            trust: ${SMTP_HOST:smtp.kuku.lu}
-          starttls:
-            enable: ${SMTP_STARTTLS:false}
-          connectiontimeout: 10000
-          timeout: 10000
-          writetimeout: 10000
-
   servlet:
     multipart:
       max-file-size: 25MB
@@ -72,6 +52,9 @@ app:
   mail:
     from: ${MAIL_FROM:no-reply@mailstock.store}
     from-name: ${MAIL_FROM_NAME:MailStock.store}
+  resend:
+    # Transactional email via HTTPS (not SMTP) — Railway Hobby blocks outbound SMTP on any port.
+    api-key: ${RESEND_API_KEY:}
   security:
     jwt:
       # No default: the app must fail fast if JWT_SECRET is not provided (env-only secret).
