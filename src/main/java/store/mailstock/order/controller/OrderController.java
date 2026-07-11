@@ -30,6 +30,13 @@ public class OrderController {
         return ApiResponse.ok(orders.createOrder(SecurityUtils.currentUserId(), req));
     }
 
+    /** Cart checkout preview: prices the items + validates a coupon without charging or consuming it. */
+    @PostMapping("/me/quote")
+    @PreAuthorize("hasRole('BUYER')")
+    public ApiResponse<store.mailstock.order.dto.OrderQuote> quote(@Valid @RequestBody OrderCreateRequest req) {
+        return ApiResponse.ok(orders.quote(SecurityUtils.currentUserId(), req));
+    }
+
     @GetMapping("/me")
     @PreAuthorize("hasRole('BUYER')")
     public ApiResponse<PageResponse<Order>> mine(

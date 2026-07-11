@@ -1,5 +1,6 @@
 package store.mailstock.auth.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
 import org.springframework.data.annotation.CreatedDate;
@@ -31,6 +32,7 @@ public class User implements UserDetails {
     private String email;
 
     @Column(name = "password_hash", nullable = false)
+    @JsonIgnore
     private String passwordHash;
 
     @Column(length = 120)
@@ -58,6 +60,23 @@ public class User implements UserDetails {
     @Builder.Default
     private boolean locked = false;
 
+    /** Auto-flagged for admin review after crossing an abuse threshold. Does NOT block login on its own. */
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean flagged = false;
+
+    @Column(name = "flagged_reason", columnDefinition = "TEXT")
+    private String flaggedReason;
+
+    @Column(name = "flagged_at")
+    private Instant flaggedAt;
+
+    /** Forces a password change before anything else is allowed (see JwtAuthFilter). Used to
+     *  neutralize the leaked seed-admin default password without needing to know the new one. */
+    @Column(name = "must_change_password", nullable = false)
+    @Builder.Default
+    private boolean mustChangePassword = false;
+
     private Instant lastLoginAt;
 
     @CreatedDate
@@ -70,7 +89,7 @@ public class User implements UserDetails {
     @Override public Collection<? extends GrantedAuthority> getAuthorities() {
         return roles.stream().map(r -> new SimpleGrantedAuthority("ROLE_" + r.name())).collect(Collectors.toList());
     }
-    @Override public String getPassword() { return passwordHash; }
+    @Override @JsonIgnore public String getPassword() { return passwordHash; }
     @Override public String getUsername() { return email; }
     @Override public boolean isAccountNonExpired() { return true; }
     @Override public boolean isAccountNonLocked() { return !locked; }

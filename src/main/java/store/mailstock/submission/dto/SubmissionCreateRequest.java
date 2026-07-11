@@ -4,6 +4,7 @@ import jakarta.validation.constraints.*;
 
 import java.math.BigDecimal;
 
+import store.mailstock.submission.entity.AccountCategory;
 import store.mailstock.submission.entity.SellerSubmission.AccountType;
 import store.mailstock.submission.entity.SellerSubmission.Provider;
 
@@ -21,8 +22,10 @@ public record SubmissionCreateRequest(
         Provider provider,                              // GMAIL (default) or OUTLOOK
         @NotBlank @Email @Size(max = 255) String emailAddress,
         @NotBlank @Size(max = 255) String emailPassword,
-        @Size(max = 120) String twoFactorCode,
-        @NotNull AccountType accountType,
+        @Size(max = 120) String twoFactorCode,          // required when the category has 2FA (checked in service)
+        @Size(max = 5000) String backupCodes,           // optional one-time backup codes
+        AccountType accountType,                         // legacy; derived from category when omitted
+        @NotNull AccountCategory accountCategory,        // buyer-facing age + 2FA taxonomy
         @NotBlank @Size(max = 80) String country,
 
         // --- Advanced options ---

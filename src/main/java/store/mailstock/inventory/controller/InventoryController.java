@@ -25,12 +25,13 @@ public class InventoryController {
     // Public browse — masked email, no delivery payload / internal notes ever leave the server.
     @GetMapping("/browse")
     public ApiResponse<PageResponse<BrowseItemResponse>> browse(
-            @RequestParam(required = false) String category,
+            @RequestParam(required = false) store.mailstock.submission.entity.AccountCategory accountCategory,
+            @RequestParam(required = false) store.mailstock.submission.entity.SellerSubmission.Provider provider,
             @RequestParam(required = false) String q,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return ApiResponse.ok(PageResponse.of(
-                svc.browse(category, q, PageRequest.of(page, size)).map(BrowseItemResponse::from)));
+                svc.browse(accountCategory, provider, q, PageRequest.of(page, size)).map(BrowseItemResponse::from)));
     }
 
     @GetMapping("/browse/featured")

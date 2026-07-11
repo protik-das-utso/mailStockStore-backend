@@ -50,6 +50,25 @@ public class AdminUserController {
         u.setEnabled(enabled); return ApiResponse.ok(users.save(u));
     }
 
+    /** Users the abuse detector has auto-flagged for review, newest first. */
+    @GetMapping("/flagged")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<java.util.List<User>> flagged() {
+        return ApiResponse.ok(users.findByFlaggedTrueOrderByFlaggedAtDesc());
+    }
+
+    /** Manually raise or clear a user's abuse flag (clearing it re-arms auto-flagging for that user). */
+    @PostMapping("/{id}/flag")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<User> flag(@PathVariable Long id, @RequestParam boolean flagged,
+                                  @RequestParam(required = false) String reason) {
+        User u = users.findById(id).orElseThrow(() -> ApiException.notFound("User not found"));
+        u.setFlagged(flagged);
+        u.setFlaggedReason(flagged ? reason : null);
+        u.setFlaggedAt(flagged ? java.time.Instant.now() : null);
+        return ApiResponse.ok(users.save(u));
+    }
+
     /** Replace a user's roles (e.g. grant REVIEWER so they can access the reviewer panel). */
     @PutMapping("/{id}/roles")
     @PreAuthorize("hasRole('ADMIN')")

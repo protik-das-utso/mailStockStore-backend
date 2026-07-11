@@ -40,6 +40,7 @@ public class ProfileController {
         if (!encoder.matches(req.currentPassword(), u.getPasswordHash()))
             throw ApiException.badRequest("Current password is incorrect");
         u.setPasswordHash(encoder.encode(req.newPassword()));
+        u.setMustChangePassword(false);
         users.save(u);
         return ApiResponse.ok(null);
     }

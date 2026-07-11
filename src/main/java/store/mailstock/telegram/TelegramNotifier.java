@@ -18,9 +18,9 @@ public class TelegramNotifier {
     private final TelegramBotRegistrar registrar;
 
     public void push(Long userId, String title, String body) {
-        if (!props.isConfigured() || userId == null) return;
+        if (userId == null) return;
         MailStockBot bot = registrar.getBot();
-        if (bot == null) return;
+        if (bot == null || !registrar.isRunning()) return;
         try {
             links.findByUserId(userId).ifPresent(l ->
                     bot.pushMessage(l.getChatId(), "*" + safe(title) + "*\n" + safe(body)));
@@ -35,9 +35,8 @@ public class TelegramNotifier {
      * If {@code userIds} is non-null, only those users' linked chats are messaged (audience targeting).
      */
     public void broadcast(String title, String body, java.util.Collection<Long> userIds) {
-        if (!props.isConfigured()) return;
         MailStockBot bot = registrar.getBot();
-        if (bot == null) return;
+        if (bot == null || !registrar.isRunning()) return;
         String text = "*" + safe(title) + "*\n" + safe(body);
         for (TelegramLink l : links.findAll()) {
             if (userIds != null && !userIds.contains(l.getUserId())) continue;

@@ -53,11 +53,22 @@ public class MailStockBot extends TelegramLongPollingBot {
     private final String uploadsDir;
 
     private enum Step { NONE, LINK_CODE, DEPOSIT_AMOUNT, DEPOSIT_TXID,
-        SELL_EMAIL, SELL_PASSWORD, SELL_COUNTRY, SELL_PRICE }
+        SELL_EMAIL, SELL_PASSWORD, SELL_COUNTRY, SELL_PRICE,
+        TICKET_SUBJECT, TICKET_BODY, WARRANTY_DESC, CART_COUPON }
+
+    /** Public website used in guidance/links. Overridable via the {@code site.url} setting. */
+    private static final String DEFAULT_SITE_URL = "https://mailstock.store";
+
+    /** Buy-many cap per checkout (mirrors the website cart). */
+    private static final int CART_MAX = 50;
 
     private static final class Session {
         Step step = Step.NONE;
         final Map<String, Object> data = new ConcurrentHashMap<>();
+        // Cart survives flow cancellations (resetConv only clears step+data), so items stay while browsing.
+        final List<Long> cart = new ArrayList<>();
+        final Map<Long, String> cartLabels = new ConcurrentHashMap<>();
+        String coupon;
     }
     private final ConcurrentHashMap<Long, Session> sessions = new ConcurrentHashMap<>();
 
@@ -108,15 +119,19 @@ public class MailStockBot extends TelegramLongPollingBot {
         String arg = text.contains(" ") ? text.substring(text.indexOf(' ') + 1).trim() : "";
         switch (cmd) {
             case "/start" -> { if (!arg.isBlank()) doLinkCode(chatId, arg); else sendMenu(chatId); }
-            case "/menu", "/help" -> sendMenu(chatId);
+            case "/menu" -> sendMenu(chatId);
+            case "/help", "/guide", "/howto" -> showHelp(chatId);
             case "/link" -> { if (arg.isBlank()) startLinkCode(chatId, s); else doLinkCode(chatId, arg); }
             case "/logout" -> doLogout(chatId, s);
-            case "/browse" -> showBrowse(chatId, 0);
+            case "/browse" -> showCategories(chatId);
             case "/wallet" -> showWallet(chatId);
             case "/deposit" -> startDeposit(chatId, s);
             case "/sell" -> startSell(chatId, s);
             case "/orders" -> showOrders(chatId);
             case "/myemails" -> showMyEmails(chatId);
+            case "/cart" -> showCart(chatId, s);
+            case "/support", "/ticket" -> startTicket(chatId, s);
+            case "/warranty" -> startWarranty(chatId);
             case "/cancel" -> { resetConv(s); send(chatId, "Cancelled.", menuOnly()); }
             default -> send(chatId,
                     "🤔 I didn't understand *" + safe(text) + "*.\nUse the menu below or type /menu.",
@@ -162,11 +177,52 @@ public class MailStockBot extends TelegramLongPollingBot {
                 if (price == null) { send(chatId, "Enter a valid price, e.g. `4.50`.", cancelKb()); return; }
                 User u = requireUser(chatId); if (u == null) { resetConv(s); return; }
                 Map<String, Object> body = new java.util.HashMap<>(s.data);
-                body.put("askingPrice", price); body.put("provider", "GMAIL"); body.put("accountType", "NEW");
+                // Quick bot listing defaults to the no-2FA "new" category; sellers refine age/2FA on the website.
+                body.put("askingPrice", price); body.put("provider", "GMAIL"); body.put("accountCategory", "NEW_NO_2FA");
                 resetConv(s);
                 JsonNode d = api.submit(u, body);
                 send(chatId, "✅ Submission #" + d.path("id").asText("?") + " sent for review.",
                         rows(List.of(btn("🏷 Sell another", "act:sell")), List.of(btn("🏠 Menu", "act:menu"))));
+            }
+            case TICKET_SUBJECT -> {
+                if (text.length() < 3) { send(chatId, "Please enter a short *subject* (min 3 characters):", cancelKb()); return; }
+                s.data.put("subject", text.length() > 200 ? text.substring(0, 200) : text);
+                s.step = Step.TICKET_BODY;
+                send(chatId, "Now describe your issue in a *message* (what happened, order # if any):", cancelKb());
+            }
+            case TICKET_BODY -> {
+                if (text.length() < 5) { send(chatId, "Please add a little more detail (min 5 characters):", cancelKb()); return; }
+                User u = requireUser(chatId); if (u == null) { resetConv(s); return; }
+                Map<String, Object> body = new java.util.HashMap<>();
+                body.put("subject", s.data.get("subject"));
+                body.put("category", "General");
+                body.put("body", text.length() > 10000 ? text.substring(0, 10000) : text);
+                resetConv(s);
+                JsonNode d = api.createTicket(u, body);
+                send(chatId, "✅ *Ticket #" + d.path("id").asText("?") + " opened.*\n"
+                        + "Our team will reply soon — you'll get a message here and can also read replies on the website.",
+                        rows(List.of(btn("🏠 Menu", "act:menu"))));
+            }
+            case CART_COUPON -> {
+                String code = text.trim();
+                resetConv(s);
+                s.coupon = code.isBlank() ? null : code;
+                showCart(chatId, s); // re-quotes and shows whether the coupon applied
+            }
+            case WARRANTY_DESC -> {
+                if (text.length() < 5) { send(chatId, "Please describe the problem in a bit more detail (min 5 characters):", cancelKb()); return; }
+                User u = requireUser(chatId); if (u == null) { resetConv(s); return; }
+                Object oid = s.data.get("orderItemId");
+                if (oid == null) { resetConv(s); send(chatId, "That warranty session expired. Start again from 🛡 Warranty.", menuOnly()); return; }
+                Map<String, Object> body = new java.util.HashMap<>();
+                body.put("orderItemId", oid);
+                body.put("reason", text.length() > 60 ? text.substring(0, 60) : text);
+                body.put("description", text.length() > 5000 ? text.substring(0, 5000) : text);
+                resetConv(s);
+                JsonNode d = api.openWarranty(u, body);
+                send(chatId, "✅ *Warranty claim #" + d.path("id").asText("?") + " submitted.*\n"
+                        + "An admin will review it and either replace the account or refund you. You'll be notified here.",
+                        rows(List.of(btn("📧 My Emails", "act:emails")), List.of(btn("🏠 Menu", "act:menu"))));
             }
             default -> resetConv(s);
         }
@@ -184,12 +240,19 @@ public class MailStockBot extends TelegramLongPollingBot {
             resetConv(s);
             switch (data.substring(4)) {
                 case "menu", "home" -> sendMenu(chatId);
-                case "browse" -> showBrowse(chatId, 0);
+                case "browse" -> showCategories(chatId);
                 case "wallet" -> showWallet(chatId);
                 case "deposit" -> startDeposit(chatId, s);
                 case "orders" -> showOrders(chatId);
                 case "emails" -> showMyEmails(chatId);
                 case "sell" -> startSell(chatId, s);
+                case "help", "guide" -> showHelp(chatId);
+                case "support" -> startTicket(chatId, s);
+                case "warranty" -> startWarranty(chatId);
+                case "cart" -> showCart(chatId, s);
+                case "checkout" -> checkout(chatId, s);
+                case "cartclear" -> clearCart(chatId, s);
+                case "coupon" -> startCoupon(chatId, s);
                 case "linkcode" -> startLinkCode(chatId, s);
                 case "logout" -> doLogout(chatId, s);
                 case "cancel" -> send(chatId, "Cancelled.", menuOnly());
@@ -197,9 +260,18 @@ public class MailStockBot extends TelegramLongPollingBot {
             }
             return;
         }
-        if (data.startsWith("browse:")) showBrowse(chatId, parseInt(data.substring(7)));
+        if (data.startsWith("cat:")) {                       // browse a category (optional :page suffix)
+            String rest = data.substring(4);
+            int sep = rest.lastIndexOf(':');
+            if (sep > 0) showCategory(chatId, rest.substring(0, sep), parseInt(rest.substring(sep + 1)));
+            else showCategory(chatId, rest, 0);
+        }
         else if (data.startsWith("item:")) showItem(chatId, parseLong(data.substring(5)));
+        else if (data.startsWith("buyc:")) confirmBuy(chatId, parseLong(data.substring(5)));
         else if (data.startsWith("buy:")) doBuy(chatId, parseLong(data.substring(4)));
+        else if (data.startsWith("wsel:")) pickWarrantyItem(chatId, s, parseLong(data.substring(5)));
+        else if (data.startsWith("addc:")) addToCart(chatId, s, parseLong(data.substring(5)));
+        else if (data.startsWith("crm:")) removeFromCart(chatId, s, parseLong(data.substring(4)));
         else send(chatId, "That button is no longer valid.", menuOnly());
     }
 
@@ -219,51 +291,117 @@ public class MailStockBot extends TelegramLongPollingBot {
     private void doLogout(Long chatId, Session s) {
         boolean was = links.resolveUser(chatId).isPresent();
         links.unlink(chatId); resetConv(s);
+        s.cart.clear(); s.cartLabels.clear(); s.coupon = null; // don't carry a cart across accounts
         send(chatId, was ? "🚪 Disconnected. Use Login to reconnect." : "You weren't connected.", menuOnly());
     }
 
-    private void showBrowse(Long chatId, int page) {
-        JsonNode d = api.browse(page);
-        JsonNode content = d.path("content");
-        if (!content.isArray() || content.isEmpty()) {
-            send(chatId, "No items are available right now. Check back soon.", menuOnly()); return;
-        }
+    /** Step 1 of buying: pick a category. Buyers choose the account age / 2FA profile they want. */
+    private void showCategories(Long chatId) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-        StringBuilder sb = new StringBuilder("*Available accounts* (page " + (page + 1) + ")\n\n");
+        for (store.mailstock.submission.entity.AccountCategory c : store.mailstock.submission.entity.AccountCategory.values())
+            rows.add(List.of(btn(c.label, "cat:" + c.name())));
+        rows.add(List.of(btn("🏠 Menu", "act:menu")));
+        send(chatId, "*🛍 Browse & Buy*\n\nChoose the type of account you're looking for:", rows);
+    }
+
+    /** Step 2: show availability for the chosen category and let the buyer pick one to purchase. */
+    private void showCategory(Long chatId, String catKey, int page) {
+        String label = catKey;
+        try { label = store.mailstock.submission.entity.AccountCategory.valueOf(catKey).label; } catch (RuntimeException ignored) {}
+
+        JsonNode d = api.browseCategory(catKey, page);
+        JsonNode content = d.path("content");
+        List<List<InlineKeyboardButton>> back = rows(
+                List.of(btn("⬅️ Categories", "act:browse")), List.of(btn("🏠 Menu", "act:menu")));
+        if (!content.isArray() || content.isEmpty()) {
+            send(chatId, "*" + safe(label) + "*\n\n😔 No accounts are available in this category right now.\n"
+                    + "Please check back soon, or pick another category.", back);
+            return;
+        }
+        long total = d.path("totalElements").asLong(content.size());
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        StringBuilder sb = new StringBuilder("*" + safe(label) + "*\n✅ " + total + " in stock\n\n");
         for (JsonNode it : content) {
             long id = it.path("id").asLong();
-            sb.append("• #").append(id).append(" ").append(safe(it.path("title").asText()))
-              .append(" — *$").append(it.path("sellingPrice").asText("?")).append("* (")
-              .append(it.path("provider").asText("")).append(", ").append(it.path("country").asText("")).append(")\n");
-            rows.add(List.of(btn("🛒 Buy #" + id + " · $" + it.path("sellingPrice").asText("?"), "buy:" + id),
-                    btn("🔍 Details", "item:" + id)));
+            String price = it.path("sellingPrice").asText("?");
+            sb.append("• ").append(it.path("provider").asText(""))
+              .append(" · ").append(it.path("country").asText(""))
+              .append(" · Warranty ").append(it.path("warrantyDays").asText("0")).append("d")
+              .append(" — *$").append(price).append("*\n");
+            rows.add(List.of(btn("🛒 Buy · $" + price, "buyc:" + id), btn("➕ Cart", "addc:" + id), btn("🔍", "item:" + id)));
         }
         int totalPages = d.path("totalPages").asInt(1);
         List<InlineKeyboardButton> nav = new ArrayList<>();
-        if (page > 0) nav.add(btn("⬅️ Prev", "browse:" + (page - 1)));
-        if (page + 1 < totalPages) nav.add(btn("Next ➡️", "browse:" + (page + 1)));
+        if (page > 0) nav.add(btn("⬅️ Prev", "cat:" + catKey + ":" + (page - 1)));
+        if (page + 1 < totalPages) nav.add(btn("Next ➡️", "cat:" + catKey + ":" + (page + 1)));
         if (!nav.isEmpty()) rows.add(nav);
+        rows.add(List.of(btn("🛒 View cart", "act:cart"), btn("⬅️ Categories", "act:browse")));
         rows.add(List.of(btn("🏠 Menu", "act:menu")));
         send(chatId, sb.toString(), rows);
     }
 
     private void showItem(Long chatId, long id) {
         JsonNode it = api.item(id);
-        String txt = "*#" + id + " " + safe(it.path("title").asText()) + "*\n"
-                + "Price: *$" + it.path("sellingPrice").asText("?") + "*\n"
-                + "Provider: " + it.path("provider").asText("") + " · Type: " + it.path("accountType").asText("") + "\n"
-                + "Country: " + it.path("country").asText("") + " · Warranty: " + it.path("warrantyDays").asText("0") + "d\n\n"
-                + safe(it.path("description").asText(""));
+        String cat = it.path("accountCategoryLabel").asText("");
+        String catKey = it.path("accountCategory").asText("");
+        String txt = "*🔍 Account details*\n\n"
+                + "Provider: *" + it.path("provider").asText("") + "*\n"
+                + (cat.isBlank() ? "" : "Category: " + safe(cat) + "\n")
+                + "Country: " + it.path("country").asText("") + "\n"
+                + "Warranty: " + it.path("warrantyDays").asText("0") + " days\n"
+                + "Price: *$" + it.path("sellingPrice").asText("?") + "*\n\n"
+                + safe(it.path("description").asText(""))
+                + "\n\n_The full email address is revealed only after purchase._";
         send(chatId, txt, rows(
-                List.of(btn("🛒 Buy now", "buy:" + id)),
-                List.of(btn("⬅️ Back to list", "act:browse"), btn("🏠 Menu", "act:menu"))));
+                List.of(btn("🛒 Buy now", "buyc:" + id), btn("➕ Add to cart", "addc:" + id)),
+                List.of(btn("⬅️ Back", catKey.isBlank() ? "act:browse" : "cat:" + catKey), btn("🏠 Menu", "act:menu"))));
     }
 
+    /** Step 3: confirmation screen — shows price, warranty and the buyer's balance before charging. */
+    private void confirmBuy(Long chatId, long id) {
+        User u = requireUser(chatId); if (u == null) return;
+        JsonNode it = api.item(id);
+        String cat = it.path("accountCategoryLabel").asText("");
+        String catKey = it.path("accountCategory").asText("");
+        String price = it.path("sellingPrice").asText("?");
+        String bal = api.wallet(u).path("availableBalance").asText("0");
+        boolean enough = true;
+        try { enough = new BigDecimal(bal).compareTo(new BigDecimal(price)) >= 0; } catch (RuntimeException ignored) {}
+
+        String txt = "*🧾 Confirm your purchase*\n\n"
+                + "Provider: *" + it.path("provider").asText("") + "*\n"
+                + (cat.isBlank() ? "" : "Category: " + safe(cat) + "\n")
+                + "Country: " + it.path("country").asText("") + "\n"
+                + "Warranty: " + it.path("warrantyDays").asText("0") + " days\n"
+                + "Price: *$" + price + "*\n"
+                + "Your balance: $" + bal + "\n\n"
+                + (enough ? "Tap confirm to pay from your balance. The login details appear instantly."
+                          : "⚠️ Your balance is too low. Add funds, then come back to buy.");
+        List<InlineKeyboardButton> backRow = List.of(
+                btn("⬅️ Back", catKey.isBlank() ? "act:browse" : "cat:" + catKey), btn("🏠 Menu", "act:menu"));
+        send(chatId, txt, enough
+                ? rows(List.of(btn("✅ Confirm & pay $" + price, "buy:" + id)), backRow)
+                : rows(List.of(btn("➕ Add balance", "act:deposit")), backRow));
+    }
+
+    /** Final step (single item): charge the balance and deliver the credentials right in the chat. */
     private void doBuy(Long chatId, long id) {
         User u = requireUser(chatId); if (u == null) return;
-        JsonNode order = api.buy(u, List.of(id), null);
-        send(chatId, "✅ Purchased! Order #" + order.path("id").asText("?")
-                        + " — total *$" + order.path("totalAmount").asText("?") + "*, " + order.path("status").asText(""),
+        sendOrderDelivery(chatId, api.buy(u, List.of(id), null));
+    }
+
+    /** Shared post-purchase delivery: confirm payment then dump each account's credentials. */
+    private void sendOrderDelivery(Long chatId, JsonNode order) {
+        JsonNode items = order.path("items");
+        send(chatId, "✅ *Payment confirmed* — $" + order.path("totalAmount").asText("?")
+                + " charged from your balance.\n\n📧 *Your login details:*");
+        if (items.isArray() && !items.isEmpty()) {
+            for (JsonNode it : items) {
+                String creds = it.path("deliveryPayload").asText("");
+                send(chatId, "```\n" + (creds.isBlank() ? "Credentials will appear under My Emails shortly." : creds) + "\n```");
+            }
+        }
+        send(chatId, "_Keep these safe — you can view them again any time under 📧 My Emails._",
                 rows(List.of(btn("📧 My Emails", "act:emails")),
                         List.of(btn("🛍 Browse more", "act:browse"), btn("🏠 Menu", "act:menu"))));
     }
@@ -327,33 +465,216 @@ public class MailStockBot extends TelegramLongPollingBot {
         if (!content.isArray() || content.isEmpty()) {
             send(chatId, "No orders yet.", rows(List.of(btn("🛍 Browse", "act:browse")), List.of(btn("🏠 Menu", "act:menu")))); return;
         }
-        StringBuilder sb = new StringBuilder("*Your recent orders*\n\n");
+        StringBuilder sb = new StringBuilder("*🧾 Your recent orders*\n\n");
         for (JsonNode o : content)
-            sb.append("• #").append(o.path("id").asText()).append(" — $").append(o.path("totalAmount").asText("?"))
-              .append(" · ").append(o.path("status").asText("")).append("\n");
+            sb.append("• Order #").append(o.path("id").asText()).append(" — *$").append(o.path("totalAmount").asText("?"))
+              .append("* · ").append(o.path("status").asText("")).append("\n");
+        sb.append("\n_Tap My Emails to view the login details for every account you've bought._");
         send(chatId, sb.toString(), rows(List.of(btn("📧 My Emails", "act:emails")), List.of(btn("🏠 Menu", "act:menu"))));
     }
 
+    /** The buyer's vault: every account they've purchased, each with its full login credentials. */
     private void showMyEmails(Long chatId) {
         User u = requireUser(chatId); if (u == null) return;
         JsonNode arr = api.myEmails(u);
         if (!arr.isArray() || arr.isEmpty()) {
-            send(chatId, "No delivered emails yet.", menuOnly()); return;
+            send(chatId, "📭 You haven't purchased any accounts yet.",
+                    rows(List.of(btn("🛍 Browse & Buy", "act:browse")), List.of(btn("🏠 Menu", "act:menu"))));
+            return;
         }
-        StringBuilder sb = new StringBuilder("*Your purchased emails*\n\n");
-        for (JsonNode e : arr)
-            sb.append("• ").append(safe(e.path("deliveredEmail").asText(e.path("title").asText("(item)")))).append("\n");
-        send(chatId, sb.toString(), menuOnly());
+        int total = arr.size();
+        send(chatId, "*📧 Your accounts* (" + total + ")\nHere are the login details for everything you've bought:");
+        int shown = 0;
+        for (JsonNode e : arr) {
+            if (shown >= 20) { send(chatId, "_Showing your 20 most recent. Open the website to see the rest._"); break; }
+            String creds = e.path("deliveryPayload").asText("");
+            send(chatId, "🔑 *Order #" + e.path("orderId").asText("?") + "*\n```\n"
+                    + (creds.isBlank() ? "Credentials unavailable — please contact support." : creds) + "\n```");
+            shown++;
+        }
+        send(chatId, "_Keep these safe._",
+                rows(List.of(btn("🛍 Browse & Buy", "act:browse")), List.of(btn("🏠 Menu", "act:menu"))));
+    }
+
+    /** How-it-works guide: what MailStock is, how to get started on the website, and every bot action. */
+    private void showHelp(Long chatId) {
+        boolean linked = links.resolveUser(chatId).isPresent();
+        String site = siteUrl();
+        String txt = "*❓ How MailStock works*\n\n"
+                + "MailStock is a marketplace for ready-made email accounts (Gmail, Outlook & more). "
+                + "Buyers get login details instantly; sellers submit accounts for review and get paid.\n\n"
+                + "*1️⃣ Create your account*\n"
+                + "Sign up on the website — " + site + "/register — then verify your email. "
+                + "Choose *Buyer* to purchase or *Seller* to sell.\n\n"
+                + "*2️⃣ Connect this bot*\n"
+                + (linked ? "✅ You're connected.\n"
+                          : "On the website open *Profile → Connect Telegram*, copy the code, tap *🔗 Connect with code* below and send it here.\n")
+                + "\n*3️⃣ Add funds*\n"
+                + "Tap *➕ Deposit* → pay via Binance Pay → send the amount & transaction ID. Your balance is credited automatically.\n\n"
+                + "*4️⃣ Buy an account*\n"
+                + "Tap *🛍 Browse & Buy* → pick a category → confirm. The login details appear instantly and stay saved under *📧 My Emails*.\n\n"
+                + "*5️⃣ Sell accounts* (sellers)\n"
+                + "Tap *🏷 Sell* to list an account for review. Manage age/2FA details and pricing on the website.\n\n"
+                + "*🛡 Warranty*\n"
+                + "If an account you bought stops working within its warranty period, tap *🛡 Warranty* to file a claim — one claim per account. An admin will replace it or refund you.\n\n"
+                + "*🛟 Support*\n"
+                + "Tap *🛟 Support* to open a ticket. We reply right here in Telegram and on the website.\n\n"
+                + "_Full site: " + site + "_";
+        send(chatId, txt, rows(
+                List.of(btn("🛟 Open a ticket", "act:support"), btn("🛡 Claim warranty", "act:warranty")),
+                List.of(btn("🛍 Browse & Buy", "act:browse")),
+                linked ? List.of(btn("🏠 Menu", "act:menu")) : List.of(btn("🔗 Connect with code", "act:linkcode"))));
+    }
+
+    /** Support: open a ticket. Anyone connected can do this; sellers/buyers alike. */
+    private void startTicket(Long chatId, Session s) {
+        if (requireUser(chatId) == null) return;
+        s.step = Step.TICKET_SUBJECT; s.data.clear();
+        send(chatId, "🛟 *Open a support ticket*\n\nWhat's it about? Send a short *subject* (e.g. \"Deposit not credited\"):",
+                cancelKb());
+    }
+
+    /**
+     * Warranty step 1: list the buyer's purchased accounts so they can pick which one to claim on.
+     * The API enforces eligibility (delivered, in-warranty, not already claimed) when the claim is filed.
+     */
+    private void startWarranty(Long chatId) {
+        User u = requireUser(chatId); if (u == null) return;
+        JsonNode arr = api.myEmails(u);
+        if (!arr.isArray() || arr.isEmpty()) {
+            send(chatId, "🛡 *Warranty*\n\nYou haven't purchased any accounts yet, so there's nothing to claim.",
+                    rows(List.of(btn("🛍 Browse & Buy", "act:browse")), List.of(btn("🏠 Menu", "act:menu"))));
+            return;
+        }
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        StringBuilder sb = new StringBuilder("🛡 *File a warranty claim*\n\nPick the account that stopped working "
+                + "(only one claim is allowed per account):\n\n");
+        int shown = 0;
+        for (JsonNode e : arr) {
+            if (shown >= 15) break;
+            long oid = e.path("id").asLong();
+            if (oid == 0) continue;
+            String title = e.path("title").asText("Account");
+            String order = e.path("orderId").asText("?");
+            sb.append("• Order #").append(order).append(" — ").append(safe(title)).append("\n");
+            rows.add(List.of(btn("🛡 Claim · #" + order + " " + shortText(title, 18), "wsel:" + oid)));
+            shown++;
+        }
+        rows.add(List.of(btn("🏠 Menu", "act:menu")));
+        send(chatId, sb.toString(), rows);
+    }
+
+    /** Warranty step 2: buyer picked an account — ask them to describe the problem, then submit. */
+    private void pickWarrantyItem(Long chatId, Session s, long orderItemId) {
+        if (requireUser(chatId) == null) return;
+        if (orderItemId <= 0) { send(chatId, "That account button is no longer valid.", menuOnly()); return; }
+        s.step = Step.WARRANTY_DESC; s.data.clear();
+        s.data.put("orderItemId", orderItemId);
+        send(chatId, "🛡 *Describe the problem*\n\nWhat's wrong with this account? "
+                + "(e.g. \"can't log in\", \"account disabled\", \"2FA not working\")", cancelKb());
+    }
+
+    // ---------- cart & multi-buy ----------
+
+    private void addToCart(Long chatId, Session s, long id) {
+        User u = requireUser(chatId); if (u == null) return;
+        if (id <= 0) { send(chatId, "That item is no longer valid.", menuOnly()); return; }
+        if (s.cart.contains(id)) { send(chatId, "Already in your cart.", cartNav(s)); return; }
+        if (s.cart.size() >= CART_MAX) {
+            send(chatId, "🛒 Your cart is full (max " + CART_MAX + " accounts). Check out first.", cartNav(s)); return;
+        }
+        JsonNode it = api.item(id); // validates the item is still browsable / available
+        s.cart.add(id);
+        s.cartLabels.put(id, it.path("provider").asText("Account") + " · $" + it.path("sellingPrice").asText("?"));
+        send(chatId, "✅ Added to cart. You now have *" + s.cart.size() + "* item(s).", cartNav(s));
+    }
+
+    private void removeFromCart(Long chatId, Session s, long id) {
+        s.cart.remove(id); s.cartLabels.remove(id);
+        showCart(chatId, s);
+    }
+
+    private void clearCart(Long chatId, Session s) {
+        s.cart.clear(); s.cartLabels.clear(); s.coupon = null;
+        send(chatId, "🗑 Cart cleared.",
+                rows(List.of(btn("🛍 Browse & Buy", "act:browse")), List.of(btn("🏠 Menu", "act:menu"))));
+    }
+
+    private void startCoupon(Long chatId, Session s) {
+        if (requireUser(chatId) == null) return;
+        if (s.cart.isEmpty()) { showCart(chatId, s); return; }
+        s.step = Step.CART_COUPON;
+        send(chatId, "🏷 Send your *coupon code* (or tap Cancel to skip):", cancelKb());
+    }
+
+    /** Cart summary with a live server quote (subtotal, discount, total) + per-item remove buttons. */
+    private void showCart(Long chatId, Session s) {
+        User u = requireUser(chatId); if (u == null) return;
+        if (s.cart.isEmpty()) {
+            send(chatId, "🛒 *Your cart is empty.*\nAdd accounts from Browse, then buy up to " + CART_MAX + " at once.",
+                    rows(List.of(btn("🛍 Browse & Buy", "act:browse")), List.of(btn("🏠 Menu", "act:menu"))));
+            return;
+        }
+        JsonNode q = api.quote(u, new ArrayList<>(s.cart), s.coupon);
+        StringBuilder sb = new StringBuilder("*🛒 Your cart* (" + s.cart.size() + "/" + CART_MAX + ")\n\n");
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        for (Long id : s.cart) {
+            String label = s.cartLabels.getOrDefault(id, "Account #" + id);
+            sb.append("• ").append(safe(label)).append("\n");
+            rows.add(List.of(btn("🗑 Remove " + shortText(label, 16), "crm:" + id)));
+        }
+        sb.append("\nSubtotal: *$").append(q.path("subtotal").asText("?")).append("*");
+        if (q.path("discount").asDouble(0) > 0)
+            sb.append("\nDiscount: -$").append(q.path("discount").asText("0"));
+        sb.append("\n*Total: $").append(q.path("payable").asText("?")).append("*");
+        if (s.coupon != null && !s.coupon.isBlank()) {
+            if (q.path("couponApplied").asBoolean(false))
+                sb.append("\n✅ Coupon `").append(safe(s.coupon)).append("` applied");
+            else
+                sb.append("\n⚠️ Coupon `").append(safe(s.coupon)).append("`: ")
+                  .append(safe(q.path("couponMessage").asText("not applied")));
+        }
+        rows.add(List.of(btn("✅ Checkout · $" + q.path("payable").asText("?"), "act:checkout")));
+        rows.add(List.of(btn(s.coupon == null ? "🏷 Add coupon" : "🏷 Change coupon", "act:coupon"),
+                btn("🗑 Clear", "act:cartclear")));
+        rows.add(List.of(btn("🛍 Keep browsing", "act:browse"), btn("🏠 Menu", "act:menu")));
+        send(chatId, sb.toString(), rows);
+    }
+
+    /** Charge the whole cart in one order, deliver every account, then empty the cart. */
+    private void checkout(Long chatId, Session s) {
+        User u = requireUser(chatId); if (u == null) return;
+        if (s.cart.isEmpty()) { showCart(chatId, s); return; }
+        // Throws (insufficient funds / item gone / bad coupon) → caught upstream; cart is preserved so the user can retry.
+        JsonNode order = api.buy(u, new ArrayList<>(s.cart), s.coupon);
+        s.cart.clear(); s.cartLabels.clear(); s.coupon = null;
+        sendOrderDelivery(chatId, order);
+    }
+
+    private static List<List<InlineKeyboardButton>> cartNav(Session s) {
+        return rows(List.of(btn("🛒 View cart (" + s.cart.size() + ")", "act:cart")),
+                List.of(btn("🛍 Keep browsing", "act:browse"), btn("🏠 Menu", "act:menu")));
+    }
+
+    /** Public site URL from the {@code site.url} setting, falling back to the default domain. */
+    private String siteUrl() {
+        return settings.findById("site.url").map(Setting::getValue).filter(v -> !v.isBlank())
+                .map(v -> v.endsWith("/") ? v.substring(0, v.length() - 1) : v)
+                .orElse(DEFAULT_SITE_URL);
     }
 
     private void sendMenu(Long chatId) {
         boolean linked = links.resolveUser(chatId).isPresent();
-        String txt = "*MailStock.store*\n" + (linked ? "Choose an option:"
-                : "_Not connected yet — connect with a code from the website (Profile → Connect Telegram)._");
+        String txt = "*🛒 MailStock.store*\n" + (linked
+                ? "Your account marketplace. What would you like to do?"
+                : "_You're not connected yet. Get a code from the website (Profile → Connect Telegram) and tap Connect below._");
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-        rows.add(List.of(btn("🛍 Browse & Buy", "act:browse"), btn("💰 Wallet", "act:wallet")));
-        rows.add(List.of(btn("➕ Deposit", "act:deposit"), btn("📦 Orders", "act:orders")));
-        rows.add(List.of(btn("📧 My Emails", "act:emails"), btn("🏷 Sell", "act:sell")));
+        rows.add(List.of(btn("🛍 Browse & Buy", "act:browse"), btn("🛒 Cart", "act:cart")));
+        rows.add(List.of(btn("💰 Wallet", "act:wallet"), btn("➕ Deposit", "act:deposit")));
+        rows.add(List.of(btn("🧾 Orders", "act:orders"), btn("📧 My Emails", "act:emails")));
+        rows.add(List.of(btn("🏷 Sell", "act:sell")));
+        rows.add(List.of(btn("🛡 Warranty", "act:warranty"), btn("🛟 Support", "act:support")));
+        rows.add(List.of(btn("❓ Help / How it works", "act:help")));
         rows.add(linked
                 ? List.of(btn("🚪 Logout", "act:logout"))
                 : List.of(btn("🔗 Connect with code", "act:linkcode")));
@@ -395,6 +716,13 @@ public class MailStockBot extends TelegramLongPollingBot {
     private static String safe(String s) {
         if (s == null) return "";
         return s.replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[");
+    }
+
+    /** Trim a label to fit inside a button (no Markdown — button text is plain). */
+    private static String shortText(String s, int max) {
+        if (s == null) return "";
+        String t = s.trim();
+        return t.length() <= max ? t : t.substring(0, Math.max(0, max - 1)) + "…";
     }
 
     private static Long chatIdOf(Update u) {

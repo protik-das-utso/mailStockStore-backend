@@ -19,16 +19,20 @@ import store.mailstock.submission.entity.SellerSubmission;
 public class InventoryService {
 
     private final InventoryRepository repo;
+    private final PricingService pricing;
 
     @Transactional
     public InventoryItem addFromSubmission(SellerSubmission s, BigDecimal purchase, BigDecimal selling,
                                            String deliveryPayload, String internalNotes) {
+        // Warranty is fixed by the account's category (admin-configured), not by what the seller typed.
+        int warrantyDays = pricing.warrantyDays(s.getProvider(), s.getAccountCategory());
         return repo.save(InventoryItem.builder()
                 .submissionId(s.getId()).sellerId(s.getSellerId())
                 .title(s.getTitle()).category(s.getCategory()).description(s.getDescription())
-                .provider(s.getProvider()).accountType(s.getAccountType()).country(s.getCountry())
+                .provider(s.getProvider()).accountType(s.getAccountType())
+                .accountCategory(s.getAccountCategory()).country(s.getCountry())
                 .purchasePrice(purchase).sellingPrice(selling)
-                .warrantyDays(s.getWarrantyDays())
+                .warrantyDays(warrantyDays)
                 .deliveryPayload(deliveryPayload).internalNotes(internalNotes)
                 .build());
     }
@@ -46,12 +50,10 @@ public class InventoryService {
     }
 
     @Transactional(readOnly = true)
-    public Page<InventoryItem> browse(String category, String q, Pageable p) {
-        if (q != null && !q.isBlank())
-            return repo.findByStockStatusAndTitleContainingIgnoreCaseOrderByIdDesc(InventoryItem.Status.AVAILABLE, q, p);
-        if (category != null && !category.isBlank())
-            return repo.findByStockStatusAndCategoryOrderByIdDesc(InventoryItem.Status.AVAILABLE, category, p);
-        return repo.findByStockStatusOrderByIdDesc(InventoryItem.Status.AVAILABLE, p);
+    public Page<InventoryItem> browse(store.mailstock.submission.entity.AccountCategory category,
+                                      SellerSubmission.Provider provider, String q, Pageable p) {
+        return repo.browseFiltered(InventoryItem.Status.AVAILABLE, category, provider,
+                (q != null && !q.isBlank()) ? q.trim() : null, p);
     }
 
     @Transactional(readOnly = true)

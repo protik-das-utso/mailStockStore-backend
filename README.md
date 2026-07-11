@@ -32,4 +32,9 @@ Reseller marketplace for digital assets. Sellers submit → Admin reviews → In
 `ADMIN`, `SELLER`, `BUYER` — enforced via `@PreAuthorize`.
 
 ## Bootstrap admin
-Seed migration creates `admin@mailstock.store` / `ChangeMe!123` — change immediately.
+The seed migration creates `admin@mailstock.store` with a default password. **That password is
+public** (it was committed to this repo's history before this fix) — do not treat it as a secret.
+The account is created with `must_change_password = TRUE`, so the backend hard-blocks every request
+from it except `POST /api/profile/change-password` (and reading `/api/profile/me`, and logout) until
+a new password is set. Log in once and change the password immediately; until you do, this account
+can do nothing else even though the old password is known.

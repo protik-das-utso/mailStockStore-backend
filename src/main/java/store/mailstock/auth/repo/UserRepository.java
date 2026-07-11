@@ -19,4 +19,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
             + "and (:q is null or lower(u.email) like lower(concat('%', cast(:q as string), '%')) "
             + "or lower(u.fullName) like lower(concat('%', cast(:q as string), '%'))) order by u.id desc")
     Page<User> search(@Param("role") Role role, @Param("q") String q, Pageable pageable);
+
+    /** Buyers/users currently flagged for abuse review, most-recently flagged first. */
+    java.util.List<User> findByFlaggedTrueOrderByFlaggedAtDesc();
 }

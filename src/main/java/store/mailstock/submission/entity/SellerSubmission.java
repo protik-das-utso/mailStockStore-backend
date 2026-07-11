@@ -31,8 +31,10 @@ public class SellerSubmission {
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 10) @Builder.Default private Provider provider = Provider.GMAIL;
     @Column(length = 255) private String emailAddress;
     @Column(length = 255) private String emailPassword;
-    @Column(length = 120) private String twoFactorCode;          // 2FA / TOTP secret or backup code (optional)
-    @Enumerated(EnumType.STRING) @Column(length = 10) private AccountType accountType;
+    @Column(length = 120) private String twoFactorCode;          // 2FA / TOTP secret (required for 2FA categories)
+    @Column(columnDefinition = "TEXT") private String backupCodes;  // one-time backup/recovery codes (optional)
+    @Enumerated(EnumType.STRING) @Column(length = 10) private AccountType accountType;   // legacy OLD/NEW, derived from category
+    @Enumerated(EnumType.STRING) @Column(length = 20) private AccountCategory accountCategory;  // buyer-facing age + 2FA taxonomy
     @Column(length = 80) private String country;
 
     // --- Advanced options ---
@@ -45,6 +47,12 @@ public class SellerSubmission {
     @Column(columnDefinition = "TEXT") private String additionalInfo;
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 20) @Builder.Default private Status status = Status.PENDING;
     @Column(precision = 14, scale = 2) private BigDecimal counterPrice;
+    // --- Approval outcome: the agreed deal, held on the submission until it is pushed to inventory ---
+    @Column(precision = 14, scale = 2) private BigDecimal purchasePrice;   // paid to the seller on approval
+    @Column(precision = 14, scale = 2) private BigDecimal sellingPrice;    // intended buyer price when listed
+    @Column(columnDefinition = "TEXT") private String deliveryPayload;     // credentials block delivered to the buyer
+    @Column(columnDefinition = "TEXT") private String internalNotes;       // admin-only notes carried onto the item
+    private Long inventoryId;                                              // set once it becomes an inventory item
     @Column(columnDefinition = "TEXT") private String adminNote;
     @Column(length = 40) private String reviewTag;   // structured verdict e.g. PASSWORD_DEAD, TWO_FA_REQUIRED
     private Long reviewedBy;
@@ -62,11 +70,12 @@ public class SellerSubmission {
         if (provider != null) sb.append("Provider: ").append(provider).append('\n');
         if (emailAddress != null) sb.append("Email: ").append(emailAddress).append('\n');
         if (emailPassword != null) sb.append("Password: ").append(emailPassword).append('\n');
-        if (twoFactorCode != null && !twoFactorCode.isBlank()) sb.append("2FA: ").append(twoFactorCode).append('\n');
+        if (twoFactorCode != null && !twoFactorCode.isBlank()) sb.append("2FA secret: ").append(twoFactorCode).append('\n');
+        if (backupCodes != null && !backupCodes.isBlank()) sb.append("Backup codes: ").append(backupCodes).append('\n');
         if (recoveryEmail != null && !recoveryEmail.isBlank()) sb.append("Recovery email: ").append(recoveryEmail).append('\n');
         if (phoneNumber != null && !phoneNumber.isBlank()) sb.append("Recovery phone: ").append(phoneNumber).append('\n');
         if (country != null && !country.isBlank()) sb.append("Country: ").append(country).append('\n');
-        if (accountType != null) sb.append("Type: ").append(accountType).append('\n');
+        if (accountCategory != null) sb.append("Category: ").append(accountCategory.label).append('\n');
         if (accountCreationYear != null) sb.append("Created: ").append(accountCreationYear).append('\n');
         return sb.toString().trim();
     }

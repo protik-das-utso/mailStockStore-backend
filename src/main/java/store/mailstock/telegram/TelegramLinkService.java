@@ -48,7 +48,9 @@ public class TelegramLinkService {
     public User consumeCode(String code, Long chatId) {
         if (code == null || code.isBlank())
             throw ApiException.badRequest("No code provided. Send it as `/link YOURCODE`.");
-        TelegramLinkCode e = codes.findById(code.trim().toUpperCase()).orElse(null);
+        // Users often paste the code with stray spaces/newlines (or an accidental trailing space) —
+        // strip ALL whitespace and normalise case before lookup so it still matches.
+        TelegramLinkCode e = codes.findById(code.replaceAll("\\s+", "").toUpperCase()).orElse(null);
         if (e == null)
             throw ApiException.badRequest("Invalid code. Generate one on the website → Profile → Connect Telegram.");
         codes.delete(e); // single-use: consume it regardless of expiry outcome below

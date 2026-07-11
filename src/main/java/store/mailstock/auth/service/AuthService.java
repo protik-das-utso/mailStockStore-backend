@@ -124,6 +124,12 @@ public class AuthService {
         if (rt.getRevokedAt() != null || rt.getExpiresAt().isBefore(Instant.now()))
             throw ApiException.unauthorized("Refresh token expired");
         User u = users.findById(rt.getUserId()).orElseThrow(() -> ApiException.notFound("User not found"));
+        // Account-conflict logout: if the account was locked or disabled since the last refresh
+        // (e.g. an admin locked it), refuse the refresh. The guard fires on every attempt while the
+        // account stays locked/disabled, so the client force-logs-out and can't slide the session.
+        if (!u.isEnabled() || !u.isAccountNonLocked())
+            throw ApiException.unauthorized(!u.isAccountNonLocked() ? "Account locked" : "Account disabled");
+        // Rotate: revoke the used token and issue a fresh access + refresh pair (slides the 7-day window).
         rt.setRevokedAt(Instant.now());
         rtRepo.save(rt);
         return issueTokens(u);
@@ -173,7 +179,7 @@ public class AuthService {
                 .expiresAt(Instant.now().plusMillis(jwt.getRefreshTtlMs()))
                 .build());
         return new AuthResponse(access, refresh, u.getId(), u.getEmail(), u.getFullName(),
-                u.getRoles().stream().map(Enum::name).collect(Collectors.toSet()));
+                u.getRoles().stream().map(Enum::name).collect(Collectors.toSet()), u.isMustChangePassword());
     }
 
     private String randomToken() {

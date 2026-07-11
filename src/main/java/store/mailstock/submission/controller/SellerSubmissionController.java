@@ -32,6 +32,13 @@ public class SellerSubmissionController {
         return ApiResponse.ok(svc.submitBulk(SecurityUtils.currentUserId(), req.items()));
     }
 
+    /** Pre-submit duplicate check: has this seller already submitted this email? */
+    @GetMapping("/check-email")
+    @PreAuthorize("hasRole('SELLER')")
+    public ApiResponse<java.util.Map<String, Object>> checkEmail(@RequestParam String email) {
+        return ApiResponse.ok(svc.checkDuplicate(SecurityUtils.currentUserId(), email));
+    }
+
     @GetMapping("/me")
     @PreAuthorize("hasRole('SELLER')")
     public ApiResponse<PageResponse<SellerSubmission>> mine(
@@ -75,6 +82,13 @@ public class SellerSubmissionController {
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<SellerSubmission> review(@PathVariable Long id, @Valid @RequestBody SubmissionReviewRequest req) {
         return ApiResponse.ok(svc.review(SecurityUtils.currentUserId(), id, req));
+    }
+
+    /** Second step after approval: list an APPROVED submission for sale (creates the inventory item). */
+    @PostMapping("/admin/{id}/inventory")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<SellerSubmission> addToInventory(@PathVariable Long id) {
+        return ApiResponse.ok(svc.addToInventory(SecurityUtils.currentUserId(), id));
     }
 
     /** Apply one review action (approve/reject/counter/needs-modify) to many submissions at once. */

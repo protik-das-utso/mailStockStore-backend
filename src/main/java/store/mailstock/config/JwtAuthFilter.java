@@ -15,6 +15,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 
+import store.mailstock.auth.entity.User;
 import store.mailstock.auth.service.CustomUserDetailsService;
 
 @Component
@@ -23,6 +24,13 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final CustomUserDetailsService userDetailsService;
+
+    /** Endpoints a must-change-password account may still call — everything else is blocked. */
+    private static boolean allowedWhilePasswordChangeRequired(String uri) {
+        return uri.equals("/api/profile/change-password")
+                || uri.equals("/api/profile/me")
+                || uri.equals("/api/auth/logout");
+    }
 
     @Override
     protected void doFilterInternal(@NonNull HttpServletRequest req,
@@ -40,6 +48,16 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                     && SecurityContextHolder.getContext().getAuthentication() == null) {
                 UserDetails user = userDetailsService.loadUserByUsername(username);
                 if (jwtService.isValid(token, user)) {
+                    // Hard server-side gate: an account with a forced password reset (e.g. the leaked
+                    // seed-admin default) can do NOTHING except change its password until it does —
+                    // this can't be bypassed by ignoring a frontend redirect, unlike a client-only check.
+                    if (user instanceof User u && u.isMustChangePassword()
+                            && !allowedWhilePasswordChangeRequired(req.getRequestURI())) {
+                        res.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                        res.setContentType("application/json");
+                        res.getWriter().write("{\"success\":false,\"message\":\"You must change your password before continuing.\"}");
+                        return;
+                    }
                     var auth = new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities());
                     auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(req));
                     SecurityContextHolder.getContext().setAuthentication(auth);

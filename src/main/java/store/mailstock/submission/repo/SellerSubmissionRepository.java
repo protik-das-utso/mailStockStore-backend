@@ -13,6 +13,9 @@ import store.mailstock.submission.entity.SellerSubmission;
 
 public interface SellerSubmissionRepository extends JpaRepository<SellerSubmission, Long> {
     Page<SellerSubmission> findBySellerIdOrderByIdDesc(Long sellerId, Pageable p);
+
+    /** A seller's prior submissions of the same email address (any status) — powers the duplicate guard. */
+    java.util.List<SellerSubmission> findBySellerIdAndEmailAddressIgnoreCase(Long sellerId, String emailAddress);
     Page<SellerSubmission> findByStatusOrderByIdDesc(SellerSubmission.Status status, Pageable p);
 
     /** Reviewer queue: everything still up for review (PENDING) or currently being checked (CHECKING). */
@@ -48,4 +51,5 @@ public interface SellerSubmissionRepository extends JpaRepository<SellerSubmissi
     long countByStatus(SellerSubmission.Status status);
     long countByStatusAndAccountType(SellerSubmission.Status status, SellerSubmission.AccountType accountType);
     long countByStatusAndProviderAndAccountType(SellerSubmission.Status status, SellerSubmission.Provider provider, SellerSubmission.AccountType accountType);
+    long countByStatusAndProviderAndAccountCategory(SellerSubmission.Status status, SellerSubmission.Provider provider, store.mailstock.submission.entity.AccountCategory accountCategory);
 }

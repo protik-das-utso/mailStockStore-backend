@@ -33,10 +33,10 @@ public class SellerSubmissionService {
     private final org.springframework.beans.factory.ObjectProvider<SellerSubmissionService> self;
 
     /** Admin-defined price per provider+type. Key = "<prefix>.<provider>_<type>" e.g. price.gmail_old, sell.outlook_new. */
-    private BigDecimal priceFor(String prefix, SellerSubmission.Provider provider, SellerSubmission.AccountType type, BigDecimal fallback) {
-        if (type == null) return fallback;
+    private BigDecimal priceFor(String prefix, SellerSubmission.Provider provider, store.mailstock.submission.entity.AccountCategory category, BigDecimal fallback) {
+        if (category == null) return fallback;
         String prov = (provider == null ? SellerSubmission.Provider.GMAIL : provider).name().toLowerCase();
-        String key = prefix + "." + prov + "_" + type.name().toLowerCase();
+        String key = prefix + "." + prov + "_" + category.key();
         return settings.findById(key)
                 .map(s -> { try { return new BigDecimal(s.getValue()); } catch (RuntimeException e) { return fallback; } })
                 .orElse(fallback);
@@ -44,6 +44,7 @@ public class SellerSubmissionService {
 
     @Transactional
     public SellerSubmission submit(Long sellerId, SubmissionCreateRequest req) {
+        requireNotDuplicate(sellerId, req.emailAddress());
         SellerSubmission s = repo.save(toEntity(sellerId, req));
         notifications.notifyAdmins("NEW_SUBMISSION", "New seller submission",
                 "Submission #" + s.getId() + " — " + s.getTitle());
@@ -53,24 +54,60 @@ public class SellerSubmissionService {
     @Transactional
     public java.util.List<SellerSubmission> submitBulk(Long sellerId, java.util.List<SubmissionCreateRequest> items) {
         java.util.List<SellerSubmission> saved = new java.util.ArrayList<>();
-        for (SubmissionCreateRequest req : items) saved.add(repo.save(toEntity(sellerId, req)));
+        java.util.Set<String> seenInBatch = new java.util.HashSet<>();
+        for (SubmissionCreateRequest req : items) {
+            String email = req.emailAddress() == null ? null : req.emailAddress().trim().toLowerCase();
+            if (email != null && !email.isBlank() && !seenInBatch.add(email))
+                throw ApiException.badRequest("Duplicate email in this batch: " + req.emailAddress());
+            requireNotDuplicate(sellerId, req.emailAddress());
+            saved.add(repo.save(toEntity(sellerId, req)));
+        }
         notifications.notifyAdmins("NEW_SUBMISSION", "New seller submissions",
                 saved.size() + " account(s) submitted by seller #" + sellerId);
         return saved;
     }
 
+    /**
+     * A seller may not submit the same email twice. If they already have a submission for this address
+     * (in ANY status — pending, rejected, approved/purchased…), the new one is refused with a message
+     * that says what happened to the earlier one.
+     */
+    private void requireNotDuplicate(Long sellerId, String email) {
+        if (email == null || email.isBlank()) return;
+        repo.findBySellerIdAndEmailAddressIgnoreCase(sellerId, email.trim()).stream().findFirst().ifPresent(prev -> {
+            throw ApiException.conflict("You already submitted this email (" + email.trim()
+                    + ") — submission #" + prev.getId() + " is " + prev.getStatus() + ". Duplicate accounts aren't allowed.");
+        });
+    }
+
+    /** Read-only pre-submit check the seller UI calls: reports whether this email was already submitted. */
+    @Transactional(readOnly = true)
+    public java.util.Map<String, Object> checkDuplicate(Long sellerId, String email) {
+        java.util.Map<String, Object> out = new java.util.HashMap<>();
+        if (email == null || email.isBlank()) { out.put("duplicate", false); return out; }
+        var prev = repo.findBySellerIdAndEmailAddressIgnoreCase(sellerId, email.trim()).stream().findFirst();
+        out.put("duplicate", prev.isPresent());
+        prev.ifPresent(p -> { out.put("status", p.getStatus().name()); out.put("submissionId", p.getId()); });
+        return out;
+    }
+
     private SellerSubmission toEntity(Long sellerId, SubmissionCreateRequest req) {
+        store.mailstock.submission.entity.AccountCategory category = requireValidCategory(req);
         String title = (req.title() != null && !req.title().isBlank()) ? req.title() : req.emailAddress();
-        String category = (req.category() != null && !req.category().isBlank()) ? req.category() : "Gmail";
+        String cat = (req.category() != null && !req.category().isBlank()) ? req.category() : "Gmail";
         return SellerSubmission.builder()
-                .sellerId(sellerId).title(title).category(category)
+                .sellerId(sellerId).title(title).category(cat)
                 .provider(req.provider() == null ? SellerSubmission.Provider.GMAIL : req.provider())
                 .description(req.description())
                 .askingPrice(req.askingPrice() == null ? BigDecimal.ZERO : req.askingPrice())
                 .warrantyDays(req.warrantyDays() == null ? 0 : req.warrantyDays())
                 .supportingFiles(req.supportingFiles()).notes(req.notes())
                 .emailAddress(req.emailAddress()).emailPassword(req.emailPassword())
-                .twoFactorCode(req.twoFactorCode()).accountType(req.accountType())
+                .twoFactorCode(req.twoFactorCode()).backupCodes(req.backupCodes())
+                .accountCategory(category)
+                // Keep the legacy OLD/NEW type populated (derived from the category) so warranty
+                // auto-replacement and older per-type reports keep working.
+                .accountType(category.legacyType)
                 .country(req.country()).recoveryEmail(req.recoveryEmail())
                 .phoneNumber(req.phoneNumber()).accountCreationYear(req.accountCreationYear())
                 .phoneVerified(Boolean.TRUE.equals(req.phoneVerified()))
@@ -78,6 +115,15 @@ public class SellerSubmissionService {
                 .quantity(req.quantity() == null ? 1 : req.quantity())
                 .additionalInfo(req.additionalInfo())
                 .build();
+    }
+
+    /** A category is mandatory, and 2FA categories require a non-blank 2FA/TOTP secret. */
+    private store.mailstock.submission.entity.AccountCategory requireValidCategory(SubmissionCreateRequest req) {
+        store.mailstock.submission.entity.AccountCategory category = req.accountCategory();
+        if (category == null) throw ApiException.badRequest("Account category is required");
+        if (category.requires2FA && (req.twoFactorCode() == null || req.twoFactorCode().isBlank()))
+            throw ApiException.badRequest("A 2FA/TOTP secret is required for \"" + category.label + "\" accounts");
+        return category;
     }
 
     @Transactional(readOnly = true)
@@ -111,30 +157,34 @@ public class SellerSubmissionService {
     @Transactional
     public SellerSubmission review(Long adminId, Long id, SubmissionReviewRequest req) {
         SellerSubmission s = get(id);
-        if (s.getStatus() == SellerSubmission.Status.PURCHASED)
-            throw ApiException.badRequest("Already purchased");
+        if (s.getStatus() == SellerSubmission.Status.PURCHASED || s.getStatus() == SellerSubmission.Status.APPROVED)
+            throw ApiException.badRequest("Already approved");
 
         switch (req.action()) {
             case "APPROVE" -> {
-                // Default to the admin-defined price for this Gmail type when no explicit price is given.
-                BigDecimal typePayout = priceFor("price", s.getProvider(), s.getAccountType(), null);
+                // Default to the admin-defined price for this provider + category when no explicit price is given.
+                BigDecimal typePayout = priceFor("price", s.getProvider(), s.getAccountCategory(), null);
                 BigDecimal purchase = req.purchasePrice() != null ? req.purchasePrice()
                         : (s.getCounterPrice() != null ? s.getCounterPrice()
                         : (typePayout != null ? typePayout : s.getAskingPrice()));
                 BigDecimal selling = req.sellingPrice() != null ? req.sellingPrice()
-                        : priceFor("sell", s.getProvider(), s.getAccountType(), purchase.multiply(new BigDecimal("1.20")));
-                s.setStatus(SellerSubmission.Status.PURCHASED);
-                // Deliver the seller's actual login details to the buyer: reuse the entity's credential
-                // block (email/password/2FA/recovery/…) and append any admin-typed extras.
+                        : priceFor("sell", s.getProvider(), s.getAccountCategory(), purchase.multiply(new BigDecimal("1.20")));
+                // Build the buyer delivery block now (seller creds + any admin extras) and HOLD it on the
+                // submission. Approving buys the account from the seller and pays them; it does NOT list it
+                // for sale — that is the separate "add to inventory" step below.
                 String creds = s.buildCredentialPayload();
                 String extra = req.deliveryPayload();
                 String payload = (extra != null && !extra.isBlank())
                         ? (creds.isBlank() ? extra.trim() : creds + "\n---\n" + extra.trim())
                         : (creds.isBlank() ? null : creds);
-                InventoryItem item = inventory.addFromSubmission(s, purchase, selling, payload, req.internalNotes());
-                wallet.creditSale(s.getSellerId(), purchase, "submission:" + s.getId() + ":item:" + item.getId());
+                s.setStatus(SellerSubmission.Status.APPROVED);
+                s.setPurchasePrice(purchase);
+                s.setSellingPrice(selling);
+                s.setDeliveryPayload(payload);
+                s.setInternalNotes(req.internalNotes());
+                wallet.creditSale(s.getSellerId(), purchase, "submission:" + s.getId());
                 notifications.notify(s.getSellerId(), "SUBMISSION_APPROVED",
-                        "Submission approved", "Your submission #" + s.getId() + " has been purchased for " + purchase);
+                        "Submission approved", "Your submission #" + s.getId() + " was approved — " + purchase + " credited to your wallet.");
             }
             case "REJECT" -> {
                 s.setStatus(SellerSubmission.Status.REJECTED);
@@ -166,6 +216,32 @@ public class SellerSubmissionService {
         s.setClaimedBy(null);
         s.setClaimedAt(null);
         return repo.save(s);
+    }
+
+    /**
+     * Second, separate step after APPROVE: turn an APPROVED submission into a sellable inventory item.
+     * Only APPROVED submissions can be inventoried, and only once it is an inventory item does it become
+     * visible to buyers (as an AVAILABLE listing). Idempotent-ish: refuses if already inventoried.
+     */
+    @Transactional
+    public SellerSubmission addToInventory(Long adminId, Long id) {
+        SellerSubmission s = get(id);
+        if (s.getStatus() != SellerSubmission.Status.APPROVED)
+            throw ApiException.badRequest("Only approved submissions can be added to inventory");
+        BigDecimal purchase = s.getPurchasePrice() != null ? s.getPurchasePrice() : s.getAskingPrice();
+        BigDecimal selling = s.getSellingPrice() != null ? s.getSellingPrice()
+                : priceFor("sell", s.getProvider(), s.getAccountCategory(), purchase.multiply(new BigDecimal("1.20")));
+        String payload = (s.getDeliveryPayload() != null && !s.getDeliveryPayload().isBlank())
+                ? s.getDeliveryPayload() : s.buildCredentialPayload();
+        InventoryItem item = inventory.addFromSubmission(s, purchase, selling, payload, s.getInternalNotes());
+        s.setStatus(SellerSubmission.Status.PURCHASED);
+        s.setInventoryId(item.getId());
+        s.setReviewedBy(adminId);
+        s.setReviewedAt(Instant.now());
+        s = repo.save(s);
+        notifications.notifyAdmins("SUBMISSION_INVENTORIED",
+                "Listed for sale", "Submission #" + s.getId() + " is now in inventory (item #" + item.getId() + ") and on sale to buyers.");
+        return s;
     }
 
     /** Admin force-releases a reviewer's claim, returning the account to the PENDING queue. */
@@ -208,6 +284,7 @@ public class SellerSubmissionService {
         if (!s.getSellerId().equals(sellerId)) throw ApiException.forbidden("Not your submission");
         if (s.getStatus() != SellerSubmission.Status.NEEDS_MODIFY)
             throw ApiException.badRequest("This submission can only be edited when the admin requests changes");
+        store.mailstock.submission.entity.AccountCategory category = requireValidCategory(req);
         s.setTitle((req.title() != null && !req.title().isBlank()) ? req.title() : req.emailAddress());
         s.setCategory((req.category() != null && !req.category().isBlank()) ? req.category() : "Gmail");
         s.setDescription(req.description());
@@ -217,7 +294,9 @@ public class SellerSubmissionService {
         s.setEmailAddress(req.emailAddress());
         s.setEmailPassword(req.emailPassword());
         s.setTwoFactorCode(req.twoFactorCode());
-        s.setAccountType(req.accountType());
+        s.setBackupCodes(req.backupCodes());
+        s.setAccountCategory(category);
+        s.setAccountType(category.legacyType);
         s.setCountry(req.country());
         s.setRecoveryEmail(req.recoveryEmail());
         s.setPhoneNumber(req.phoneNumber());

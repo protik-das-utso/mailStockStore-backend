@@ -45,6 +45,12 @@ public class WarrantyController {
         return ApiResponse.ok(PageResponse.of(svc.adminList(status, q, PageRequest.of(page, size))));
     }
 
+    @GetMapping("/admin/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<store.mailstock.warranty.dto.WarrantyDetailResponse> detail(@PathVariable Long id) {
+        return ApiResponse.ok(svc.detail(id));
+    }
+
     @PostMapping("/admin/{id}/decision")
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<WarrantyClaim> decide(@PathVariable Long id, @Valid @RequestBody WarrantyDecisionRequest req) {

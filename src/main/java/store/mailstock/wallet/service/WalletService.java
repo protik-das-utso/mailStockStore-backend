@@ -35,6 +35,7 @@ public class WalletService {
     private final WalletDepositRepository deposits;
     private final NotificationService notifications;
     private final AuditService audit;
+    private final store.mailstock.abuse.service.AbuseService abuse;
 
     @Transactional
     public Wallet createForSeller(Long userId) {
@@ -201,7 +202,10 @@ public class WalletService {
         d.setAdminNote(req.adminNote());
         d.setProcessedBy(adminId);
         d.setProcessedAt(Instant.now());
-        return deposits.save(d);
+        WalletDeposit saved = deposits.save(d);
+        // Auto-flag the user for admin review if this rejection pushes them over the abuse threshold.
+        if (!req.approve()) abuse.onFailedDeposit(saved.getUserId());
+        return saved;
     }
 
     /**

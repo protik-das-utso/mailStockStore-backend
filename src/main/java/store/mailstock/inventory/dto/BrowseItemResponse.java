@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 
 import store.mailstock.common.util.MaskUtil;
 import store.mailstock.inventory.entity.InventoryItem;
+import store.mailstock.submission.entity.AccountCategory;
 import store.mailstock.submission.entity.SellerSubmission;
 
 /**
@@ -17,6 +18,8 @@ public record BrowseItemResponse(
         String description,
         SellerSubmission.Provider provider,
         SellerSubmission.AccountType accountType,
+        AccountCategory accountCategory,
+        String accountCategoryLabel,
         String country,
         BigDecimal sellingPrice,
         Integer warrantyDays,
@@ -30,6 +33,8 @@ public record BrowseItemResponse(
                 i.getDescription(),
                 i.getProvider(),
                 i.getAccountType(),
+                i.getAccountCategory(),
+                i.getAccountCategory() != null ? i.getAccountCategory().label : null,
                 i.getCountry(),
                 i.getSellingPrice(),
                 i.getWarrantyDays(),

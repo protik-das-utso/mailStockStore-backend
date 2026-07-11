@@ -57,6 +57,11 @@ public class BotApiClient {
         return getPublic("/api/inventory/browse?page=" + page + "&size=5");
     }
 
+    /** Browse only accounts in a given category (enum name, e.g. Y3_PLUS). */
+    public JsonNode browseCategory(String category, int page) {
+        return getPublic("/api/inventory/browse?accountCategory=" + category + "&page=" + page + "&size=6");
+    }
+
     public JsonNode item(long id) {
         return getPublic("/api/inventory/browse/" + id);
     }
@@ -71,6 +76,14 @@ public class BotApiClient {
         body.put("inventoryIds", inventoryIds);
         if (couponCode != null && !couponCode.isBlank()) body.put("couponCode", couponCode);
         return post(u, "/api/orders", body);
+    }
+
+    /** Read-only cart preview: subtotal + coupon discount + payable (no charge, no coupon consumed). */
+    public JsonNode quote(User u, List<Long> inventoryIds, String couponCode) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("inventoryIds", inventoryIds);
+        if (couponCode != null && !couponCode.isBlank()) body.put("couponCode", couponCode);
+        return post(u, "/api/orders/me/quote", body);
     }
 
     public JsonNode deposit(User u, BigDecimal amount, String txid) {
@@ -90,6 +103,16 @@ public class BotApiClient {
 
     public JsonNode myEmails(User u) {
         return get(u, "/api/orders/me/emails");
+    }
+
+    /** Open a support ticket as the linked user. Body: subject, body, category (optional). */
+    public JsonNode createTicket(User u, Map<String, Object> body) {
+        return post(u, "/api/support", body);
+    }
+
+    /** File a warranty claim as the linked user. Body: orderItemId, reason, description (optional). */
+    public JsonNode openWarranty(User u, Map<String, Object> body) {
+        return post(u, "/api/warranty", body);
     }
 
     // ---- low-level ----

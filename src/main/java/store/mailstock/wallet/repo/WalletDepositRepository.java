@@ -22,6 +22,9 @@ public interface WalletDepositRepository extends JpaRepository<WalletDeposit, Lo
     Page<WalletDeposit> findByStatusOrderByIdDesc(WalletDeposit.Status status, Pageable p);
     long countByStatus(WalletDeposit.Status status);
 
+    /** How many of a user's deposits ended in a given status — REJECTED feeds the abuse auto-flag threshold. */
+    long countByUserIdAndStatus(Long userId, WalletDeposit.Status status);
+
     /** All deposits in a status — the reconciler scans the (small) PENDING set each poll. */
     List<WalletDeposit> findByStatus(WalletDeposit.Status status);
 

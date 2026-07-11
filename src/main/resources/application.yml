@@ -60,7 +60,10 @@ app:
       # No default: the app must fail fast if JWT_SECRET is not provided (env-only secret).
       secret: ${JWT_SECRET}
       access-token-ttl-minutes: ${JWT_ACCESS_TTL:30}
-      refresh-token-ttl-days: ${JWT_REFRESH_TTL:14}
+      # Session length: 7 days. The refresh token ROTATES on every /auth/refresh (old one revoked,
+      # new 7-day token issued), so any activity within 7 days slides the window forward — a user who
+      # opens the app at least once a week stays logged in; 7 days of inactivity ends the session.
+      refresh-token-ttl-days: ${JWT_REFRESH_TTL:7}
     cors:
       allowed-origins: ${CORS_ORIGINS:http://localhost:3000}
   rate-limit:

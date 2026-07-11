@@ -13,7 +13,7 @@ import java.time.Instant;
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 @EntityListeners(AuditingEntityListener.class)
 public class InventoryItem {
-    public enum Status { AVAILABLE, RESERVED, SOLD, ARCHIVED }
+    public enum Status { AVAILABLE, RESERVED, SOLD, ARCHIVED, DEAD }
 
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY) private Long id;
     private Long submissionId;
@@ -22,6 +22,7 @@ public class InventoryItem {
     @Column(nullable = false, length = 50) private String category;
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 10) @Builder.Default private store.mailstock.submission.entity.SellerSubmission.Provider provider = store.mailstock.submission.entity.SellerSubmission.Provider.GMAIL;
     @Enumerated(EnumType.STRING) @Column(length = 10) private store.mailstock.submission.entity.SellerSubmission.AccountType accountType;
+    @Enumerated(EnumType.STRING) @Column(length = 20) private store.mailstock.submission.entity.AccountCategory accountCategory;
     @Column(length = 80) private String country;
     @Column(columnDefinition = "TEXT") private String description;
     @Column(nullable = false, precision = 14, scale = 2) private BigDecimal purchasePrice;

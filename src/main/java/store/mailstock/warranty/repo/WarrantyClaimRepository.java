@@ -9,6 +9,9 @@ public interface WarrantyClaimRepository extends JpaRepository<WarrantyClaim, Lo
     Page<WarrantyClaim> findByBuyerIdOrderByIdDesc(Long buyerId, Pageable p);
     Page<WarrantyClaim> findByStatusOrderByIdDesc(WarrantyClaim.Status status, Pageable p);
 
+    /** All claims ever opened against one order item — used to block a second claim on the same account. */
+    java.util.List<WarrantyClaim> findByOrderItemId(Long orderItemId);
+
     /** Admin list: optional status filter + free-text over reason/description/note/id/buyer id, newest first. */
     @org.springframework.data.jpa.repository.Query("select c from WarrantyClaim c where (:status is null or c.status = :status) "
             + "and (:q is null or lower(c.reason) like lower(concat('%', cast(:q as string), '%')) "
@@ -20,4 +23,7 @@ public interface WarrantyClaimRepository extends JpaRepository<WarrantyClaim, Lo
                                     @org.springframework.data.repository.query.Param("q") String q, Pageable p);
     long countByStatus(WarrantyClaim.Status status);
     long countByBuyerIdAndStatus(Long buyerId, WarrantyClaim.Status status);
+
+    /** Every claim this buyer has ever opened — feeds the abuse auto-flag threshold. */
+    long countByBuyerId(Long buyerId);
 }

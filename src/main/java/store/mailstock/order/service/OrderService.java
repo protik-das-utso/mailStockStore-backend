@@ -72,6 +72,7 @@ public class OrderService {
         for (InventoryItem i : chosen) {
             OrderItem oi = OrderItem.builder()
                     .inventoryId(i.getId()).title(i.getTitle()).price(i.getSellingPrice())
+                    // Warranty is fixed per category (set on the item at listing time) — buyer doesn't choose it.
                     .warrantyDays(i.getWarrantyDays())
                     .deliveryPayload(i.getDeliveryPayload())   // snapshot credentials at sale time
                     .build();
@@ -100,6 +101,39 @@ public class OrderService {
                 "Order #" + order.getId() + " paid from balance: " + payable);
 
         return order;
+    }
+
+    /**
+     * Read-only checkout preview for a cart: price the (de-duplicated) items, validate a coupon if
+     * given, and return the subtotal / discount / payable. Consumes nothing — safe to call as the
+     * buyer edits the cart or types a coupon. An invalid coupon doesn't fail the quote; it comes back
+     * with couponApplied=false and a reason so the cart can still check out at full price.
+     */
+    @Transactional(readOnly = true)
+    public store.mailstock.order.dto.OrderQuote quote(Long buyerId, OrderCreateRequest req) {
+        List<Long> ids = req.inventoryIds().stream().distinct().toList();
+        BigDecimal subtotal = BigDecimal.ZERO;
+        int count = 0;
+        for (Long id : ids) {
+            InventoryItem i = inventory.get(id);
+            if (i.getStockStatus() != InventoryItem.Status.AVAILABLE)
+                throw ApiException.badRequest("Item unavailable: " + i.getTitle());
+            subtotal = subtotal.add(i.getSellingPrice());
+            count++;
+        }
+        BigDecimal discount = BigDecimal.ZERO;
+        boolean applied = false;
+        String message = null;
+        if (req.couponCode() != null && !req.couponCode().isBlank()) {
+            try {
+                discount = coupons.previewDiscount(req.couponCode(), subtotal, buyerId);
+                applied = true;
+            } catch (ApiException e) {
+                message = e.getMessage();
+            }
+        }
+        BigDecimal payable = subtotal.subtract(discount).max(BigDecimal.ZERO);
+        return new store.mailstock.order.dto.OrderQuote(count, subtotal, discount, payable, applied, message);
     }
 
     @Transactional(readOnly = true)
