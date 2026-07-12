@@ -87,8 +87,9 @@ public class OrderService {
         // Deliver immediately.
         Instant now = Instant.now();
         for (OrderItem oi : order.getItems()) {
-            if (oi.getWarrantyDays() != null && oi.getWarrantyDays() > 0)
-                oi.setWarrantyExpiresAt(now.plus(oi.getWarrantyDays(), ChronoUnit.DAYS));
+            // Always stamp an expiry — a 0-day category expires the moment it is sold. Leaving this
+            // null would read as "no expiry set" and make the account claimable forever.
+            oi.setWarrantyExpiresAt(now.plus(oi.getWarrantyDays() == null ? 0 : oi.getWarrantyDays(), ChronoUnit.DAYS));
             inventory.markSold(oi.getInventoryId());
         }
         order.setStatus(Order.Status.DELIVERED);
@@ -197,8 +198,7 @@ public class OrderService {
         }
 
         Instant now = Instant.now();
-        if (oi.getWarrantyDays() != null && oi.getWarrantyDays() > 0)
-            oi.setWarrantyExpiresAt(now.plus(oi.getWarrantyDays(), ChronoUnit.DAYS));
+        oi.setWarrantyExpiresAt(now.plus(oi.getWarrantyDays() == null ? 0 : oi.getWarrantyDays(), ChronoUnit.DAYS));
         inventory.markSold(i.getId());
         order.setStatus(Order.Status.DELIVERED);
         order.setCompletedAt(now);

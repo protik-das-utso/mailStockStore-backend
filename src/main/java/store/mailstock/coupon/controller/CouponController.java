@@ -5,6 +5,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import store.mailstock.common.dto.ApiResponse;
+import store.mailstock.common.exception.ApiException;
 import store.mailstock.coupon.entity.Coupon;
 import store.mailstock.coupon.repo.CouponRepository;
 
@@ -31,7 +32,13 @@ public class CouponController {
     @PutMapping("/admin/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<Coupon> update(@PathVariable Long id, @RequestBody Coupon c) {
+        Coupon existing = repo.findById(id)
+                .orElseThrow(() -> ApiException.notFound("Coupon not found"));
         c.setId(id);
+        // usedCount and createdAt are owned by the server, not the editor. Taking them from the request
+        // body would reset the redemption counter to 0 on every edit and re-arm an exhausted coupon.
+        c.setUsedCount(existing.getUsedCount());
+        c.setCreatedAt(existing.getCreatedAt());
         return ApiResponse.ok(repo.save(c));
     }
 

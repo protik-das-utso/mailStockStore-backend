@@ -8,15 +8,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import store.mailstock.auth.entity.Role;
 import store.mailstock.auth.entity.User;
 import store.mailstock.auth.repo.UserRepository;
 import store.mailstock.common.exception.ApiException;
-import store.mailstock.email.EmailService;
 import store.mailstock.notification.service.NotificationService;
 import store.mailstock.order.repo.OrderRepository;
 import store.mailstock.support.dto.AdminTicketUpdateRequest;
@@ -38,11 +35,8 @@ public class SupportService {
     private final SupportTicketRepository tickets;
     private final TicketMessageRepository messages;
     private final NotificationService notifications;
-    private final EmailService email;
     private final UserRepository users;
     private final OrderRepository orders;
-
-    @Value("${app.frontend-url}") private String frontendUrl;
 
     // ---------------- commands ----------------
 
@@ -200,31 +194,13 @@ public class SupportService {
         return users.findById(userId).map(User::getFullName).orElse("User #" + userId);
     }
 
-    private List<User> admins() {
-        return users.findAll().stream().filter(u -> u.hasRole(Role.ADMIN)).toList();
-    }
-
+    // Delivery (in-app + Telegram + email) is centralised in NotificationService, which sends the email
+    // only when the admin has that event's toggle on — see EmailPreferenceService.
     private void notifyOwner(SupportTicket t, String type, String title, String body, String preview) {
-        String link = "/support/" + t.getId();
-        notifications.notify(t.getUserId(), type, title, body, link); // in-app + Telegram
-        users.findById(t.getUserId()).ifPresent(u ->
-                emailSupport(u.getEmail(), title, body, preview, frontendUrl + link));
+        notifications.notify(t.getUserId(), type, title, body, "/support/" + t.getId(), preview);
     }
 
     private void notifyAdmins(String type, String title, String body, Long ticketId, String preview) {
-        notifications.notifyAdmins(type, title, body); // in-app + Telegram to each admin
-        String link = frontendUrl + "/admin/support/" + ticketId;
-        for (User a : admins()) emailSupport(a.getEmail(), title, body, preview, link);
-    }
-
-    private void emailSupport(String to, String heading, String message, String preview, String link) {
-        if (to == null || to.isBlank()) return;
-        Map<String, Object> model = new HashMap<>();
-        model.put("heading", heading);
-        model.put("message", message);
-        if (preview != null && !preview.isBlank())
-            model.put("preview", preview.length() > 160 ? preview.substring(0, 160) + "…" : preview);
-        model.put("link", link);
-        email.sendGeneric(to, heading, "support", model); // @Async, best-effort
+        notifications.notifyAdmins(type, title, body, "/admin/support/" + ticketId, preview);
     }
 }

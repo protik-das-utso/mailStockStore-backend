@@ -36,6 +36,16 @@ public class WalletService {
     private final NotificationService notifications;
     private final AuditService audit;
     private final store.mailstock.abuse.service.AbuseService abuse;
+    private final store.mailstock.setting.repo.SettingRepository settings;
+
+    /** Smallest amount a seller may withdraw. Admin-configurable via the {@code site.min_withdraw}
+     *  setting; defaults to $5 when unset or unparseable. */
+    private BigDecimal minWithdraw() {
+        return settings.findById("site.min_withdraw")
+                .map(s -> { try { return new BigDecimal(s.getValue().trim()); } catch (RuntimeException e) { return new BigDecimal("5"); } })
+                .filter(v -> v.signum() > 0)
+                .orElse(new BigDecimal("5"));
+    }
 
     @Transactional
     public Wallet createForSeller(Long userId) {
@@ -249,6 +259,11 @@ public class WalletService {
 
     @Transactional
     public WithdrawRequest requestWithdraw(Long userId, WithdrawCreateRequest req) {
+        if (req.amount() == null || req.amount().signum() <= 0)
+            throw ApiException.badRequest("Enter a valid amount");
+        BigDecimal min = minWithdraw();
+        if (req.amount().compareTo(min) < 0)
+            throw ApiException.badRequest("Minimum withdrawal is $" + min.stripTrailingZeros().toPlainString());
         Wallet w = lockWallet(userId);
         if (w.getAvailableBalance().compareTo(req.amount()) < 0)
             throw ApiException.badRequest("Insufficient balance");

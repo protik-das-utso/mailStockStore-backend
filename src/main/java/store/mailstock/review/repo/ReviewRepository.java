@@ -10,6 +10,7 @@ import store.mailstock.review.entity.Review;
 @Repository
 public interface ReviewRepository extends JpaRepository<Review, Long> {
     List<Review> findByInventoryIdAndApprovedTrueOrderByIdDesc(Long id);
+    boolean existsByInventoryIdAndBuyerId(Long inventoryId, Long buyerId);
     List<Review> findByApprovedFalseOrderByIdDesc();
     List<Review> findTop6ByApprovedTrueOrderByIdDesc();
     long countByApprovedFalse();

@@ -30,6 +30,7 @@ import store.mailstock.auth.entity.User;
 import store.mailstock.common.exception.ApiException;
 import store.mailstock.setting.entity.Setting;
 import store.mailstock.setting.repo.SettingRepository;
+import store.mailstock.submission.entity.AccountCategory;
 
 /**
  * MailStock Telegram bot. Buyers/sellers browse & buy, manage wallet/deposits and sell accounts —
@@ -53,7 +54,7 @@ public class MailStockBot extends TelegramLongPollingBot {
     private final String uploadsDir;
 
     private enum Step { NONE, LINK_CODE, DEPOSIT_AMOUNT, DEPOSIT_TXID,
-        SELL_EMAIL, SELL_PASSWORD, SELL_COUNTRY, SELL_PRICE,
+        SELL_EMAIL, SELL_PASSWORD, SELL_COUNTRY, SELL_2FA,
         TICKET_SUBJECT, TICKET_BODY, WARRANTY_DESC, CART_COUPON }
 
     /** Public website used in guidance/links. Overridable via the {@code site.url} setting. */
@@ -180,20 +181,21 @@ public class MailStockBot extends TelegramLongPollingBot {
                 s.step = Step.SELL_COUNTRY; send(chatId, "*Country* of the account (e.g. US):", cancelKb());
             }
             case SELL_COUNTRY -> {
-                s.data.put("country", text); s.step = Step.SELL_PRICE;
-                send(chatId, "Your *asking price* in USD, e.g. `4.50`:", cancelKb());
+                s.data.put("country", text);
+                AccountCategory cat = categoryOf(s);
+                // 2FA categories need a TOTP secret (the API rejects the submission otherwise);
+                // no-2FA categories go straight to submission. Price is never asked — it's fixed by category.
+                if (cat != null && cat.requires2FA) {
+                    s.step = Step.SELL_2FA;
+                    send(chatId, "This category needs *2FA*. Send the account's *2FA / TOTP secret key* "
+                            + "(the authenticator setup key, not a 6-digit code):", cancelKb());
+                } else {
+                    submitSell(chatId, s);
+                }
             }
-            case SELL_PRICE -> {
-                BigDecimal price = parseAmount(text);
-                if (price == null) { send(chatId, "Enter a valid price, e.g. `4.50`.", cancelKb()); return; }
-                User u = requireUser(chatId); if (u == null) { resetConv(s); return; }
-                Map<String, Object> body = new java.util.HashMap<>(s.data);
-                // Quick bot listing defaults to the no-2FA "new" category; sellers refine age/2FA on the website.
-                body.put("askingPrice", price); body.put("provider", "GMAIL"); body.put("accountCategory", "NEW_NO_2FA");
-                resetConv(s);
-                JsonNode d = api.submit(u, body);
-                send(chatId, "✅ Submission #" + d.path("id").asText("?") + " sent for review.",
-                        rows(List.of(btn("🏷 Sell another", "act:sell")), List.of(btn("🏠 Menu", "act:menu"))));
+            case SELL_2FA -> {
+                s.data.put("twoFactorCode", text.trim());
+                submitSell(chatId, s);
             }
             case TICKET_SUBJECT -> {
                 if (text.length() < 3) { send(chatId, "Please enter a short *subject* (min 3 characters):", cancelKb()); return; }
@@ -286,6 +288,7 @@ public class MailStockBot extends TelegramLongPollingBot {
         else if (data.startsWith("buyc:")) confirmBuy(chatId, parseLong(data.substring(5)));
         else if (data.startsWith("buy:")) doBuy(chatId, parseLong(data.substring(4)));
         else if (data.startsWith("wsel:")) pickWarrantyItem(chatId, s, parseLong(data.substring(5)));
+        else if (data.startsWith("scat:")) startSellDetails(chatId, s, data.substring(5));
         else if (data.startsWith("addc:")) addToCart(chatId, s, parseLong(data.substring(5)));
         else if (data.startsWith("crm:")) removeFromCart(chatId, s, parseLong(data.substring(4)));
         else send(chatId, "That button is no longer valid.", menuOnly());
@@ -498,12 +501,17 @@ public class MailStockBot extends TelegramLongPollingBot {
     private void showWallet(Long chatId) {
         User u = requireUser(chatId); if (u == null) return;
         JsonNode w = api.wallet(u);
+        boolean seller = isSeller(u), buyer = isBuyer(u);
         String txt = "*Your wallet*\nAvailable: *$" + w.path("availableBalance").asText("0") + "*\n"
                 + "Pending: $" + w.path("pendingBalance").asText("0") + "\n"
                 + "Total earnings: $" + w.path("totalEarnings").asText("0");
-        send(chatId, txt, rows(
-                List.of(btn("➕ Deposit", "act:deposit"), btn("📦 Orders", "act:orders")),
-                List.of(btn("🏠 Menu", "act:menu"))));
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        // Buyers deposit & track orders; sellers withdraw earnings (on the website). Orders are a buyer
+        // concept, so a seller-only account never sees them here.
+        if (buyer) rows.add(List.of(btn("➕ Deposit", "act:deposit"), btn("🧾 Orders", "act:orders")));
+        if (seller) rows.add(List.of(urlBtn("💸 Withdraw (website)", siteUrl() + "/seller/wallet")));
+        rows.add(List.of(btn("🏠 Menu", "act:menu")));
+        send(chatId, txt, rows);
     }
 
     private void startDeposit(Long chatId, Session s) {
@@ -545,8 +553,54 @@ public class MailStockBot extends TelegramLongPollingBot {
                     rows(List.of(urlBtn("🌐 Become a seller", siteUrl() + "/register")), List.of(btn("🏠 Menu", "act:menu"))));
             return;
         }
-        s.step = Step.SELL_EMAIL; s.data.clear();
-        send(chatId, "🏷 *List an account*\nSend the *email address*:", cancelKb());
+        resetConv(s);
+        // Step 1 (mirrors the website): choose the account category. The price and warranty are FIXED
+        // per category by the admin — the seller is never asked for a price.
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        for (AccountCategory c : AccountCategory.values())
+            rows.add(List.of(btn(c.label, "scat:" + c.name())));
+        rows.add(List.of(btn("🏠 Menu", "act:menu")));
+        send(chatId, "🏷 *List an account*\n\nFirst pick the *category* of the account you're selling. "
+                + "The payout is set automatically by category (same as the website).", rows);
+    }
+
+    /** Step 2 of selling: a category was chosen — collect the account's email/password/country next. */
+    private void startSellDetails(Long chatId, Session s, String catKey) {
+        User u = requireUser(chatId); if (u == null) return;
+        if (!isSeller(u)) { startSell(chatId, s); return; }
+        AccountCategory cat;
+        try { cat = AccountCategory.valueOf(catKey); }
+        catch (RuntimeException e) { send(chatId, "That category is no longer valid. Tap 🏷 Sell to start again.", menuOnly()); return; }
+        s.data.clear();
+        s.data.put("accountCategory", cat.name());
+        s.step = Step.SELL_EMAIL;
+        send(chatId, "🏷 *" + safe(cat.label) + "*\n\nSend the account's *email address*:", cancelKb());
+    }
+
+    /** Chosen sell category from the session, or null if it's missing/invalid. */
+    private static AccountCategory categoryOf(Session s) {
+        Object v = s.data.get("accountCategory");
+        if (v == null) return null;
+        try { return AccountCategory.valueOf(v.toString()); } catch (RuntimeException e) { return null; }
+    }
+
+    /** Final sell step: build the submission (price fixed by category — none is sent) and post it. */
+    private void submitSell(Long chatId, Session s) {
+        User u = requireUser(chatId); if (u == null) { resetConv(s); return; }
+        AccountCategory cat = categoryOf(s);
+        if (cat == null) { resetConv(s); send(chatId, "That sell session expired. Tap 🏷 Sell to start again.", menuOnly()); return; }
+        Map<String, Object> body = new java.util.HashMap<>();
+        body.put("emailAddress", s.data.get("emailAddress"));
+        body.put("emailPassword", s.data.get("emailPassword"));
+        body.put("country", s.data.get("country"));
+        body.put("provider", "GMAIL");                 // bot lists Gmail; provider×category still fixes the price
+        body.put("accountCategory", cat.name());
+        if (s.data.get("twoFactorCode") != null) body.put("twoFactorCode", s.data.get("twoFactorCode"));
+        resetConv(s);
+        JsonNode d = api.submit(u, body);
+        send(chatId, "✅ Submission #" + d.path("id").asText("?") + " sent for review.\n"
+                + "_The payout for this category is set automatically — same as the website._",
+                rows(List.of(btn("🏷 Sell another", "act:sell")), List.of(btn("🏠 Menu", "act:menu"))));
     }
 
     /** Seller's submissions list with status, so they can track review progress from the bot. */

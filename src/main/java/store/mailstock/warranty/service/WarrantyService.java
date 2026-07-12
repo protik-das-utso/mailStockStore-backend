@@ -55,7 +55,11 @@ public class WarrantyService {
             throw ApiException.badRequest("Payment for this order is still pending — you can claim warranty only after it is paid and delivered.");
         if (st != store.mailstock.order.entity.Order.Status.DELIVERED)
             throw ApiException.badRequest("Warranty can only be claimed on a delivered order.");
-        if (oi.getWarrantyExpiresAt() != null && oi.getWarrantyExpiresAt().isBefore(Instant.now()))
+        // A null expiry means the account was sold with no warranty at all (0-day category, or an item
+        // delivered before expiries were always stamped). It is NOT an "unlimited warranty".
+        if (oi.getWarrantyExpiresAt() == null)
+            throw ApiException.badRequest("This account was sold without a warranty, so it cannot be claimed.");
+        if (oi.getWarrantyExpiresAt().isBefore(Instant.now()))
             throw ApiException.badRequest("Warranty period expired");
         // One claim per email — for life. Once ANY claim (even a rejected one) has been opened against
         // this account, it can never be claimed again. A fresh replacement is a NEW order item with its

@@ -56,7 +56,10 @@ public class CouponService {
      * Runs the SAME rules as {@link #computeDiscount} (active, window, minimum, per-user & global caps)
      * but does NOT consume a use or record a redemption, so it can be called freely as the buyer types.
      */
-    @Transactional(readOnly = true)
+    // noRollbackFor: the caller (OrderService.quote) catches these rejections to report them as a
+    // friendly "coupon not applied" reason. Without this, the throw marks the shared read-only
+    // transaction rollback-only and the commit blows up with UnexpectedRollbackException (HTTP 500).
+    @Transactional(readOnly = true, noRollbackFor = ApiException.class)
     public BigDecimal previewDiscount(String code, BigDecimal total, Long buyerId) {
         Coupon c = repo.findByCodeIgnoreCase(code)
                 .orElseThrow(() -> ApiException.badRequest("Invalid coupon"));

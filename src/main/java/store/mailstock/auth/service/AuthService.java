@@ -104,8 +104,12 @@ public class AuthService {
         try {
             auth = authManager.authenticate(new UsernamePasswordAuthenticationToken(req.email(), req.password()));
         } catch (DisabledException e) {
-            // User.isEnabled() == enabled && emailVerified, so an unverified account authenticates
-            // as "disabled". Surface it as a clear 403 the client can act on (show resend UI).
+            // User.isEnabled() == enabled && emailVerified, so BOTH an unverified account and an
+            // admin-disabled one authenticate as "disabled". Tell them apart: if the email is already
+            // verified, the account was switched off by an admin and a resend link cannot help.
+            User existing = users.findByEmailIgnoreCase(req.email()).orElse(null);
+            if (existing != null && existing.isEmailVerified())
+                throw ApiException.forbidden("Account disabled");
             throw ApiException.forbidden("Email not verified");
         } catch (LockedException e) {
             throw ApiException.forbidden("Account locked");
