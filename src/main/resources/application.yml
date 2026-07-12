@@ -123,4 +123,10 @@ springdoc:
 logging:
   level:
     root: INFO
-    store.mailstock: DEBUG
+    # App logs at INFO in production to stay well under host log-rate limits; override to DEBUG locally
+    # via LOG_LEVEL_APP if you need it.
+    store.mailstock: ${LOG_LEVEL_APP:INFO}
+    # The Telegram long-poll library logs a stack trace on every getUpdates 409 Conflict. If two
+    # instances ever poll the same token, that becomes a log flood — cap it so it can't overwhelm the
+    # host's log-rate limit. The real fix for a 409 is ensuring only ONE instance polls the token.
+    org.telegram.telegrambots.updatesreceivers.DefaultBotSession: ${LOG_LEVEL_TELEGRAM:OFF}
