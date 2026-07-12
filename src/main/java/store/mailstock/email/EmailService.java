@@ -25,14 +25,14 @@ public class EmailService {
     @Async
     public void sendVerification(String to, String name, String token) {
         String link = frontendUrl + "/verify-email?token=" + token;
-        send(to, "Verify your MailStock.store email",
+        send(to, "Verify your Mail Stock Store email",
                 "verify", Map.of("name", name, "link", link));
     }
 
     @Async
     public void sendPasswordReset(String to, String name, String token) {
         String link = frontendUrl + "/reset-password?token=" + token;
-        send(to, "Reset your MailStock.store password",
+        send(to, "Reset your Mail Stock Store password",
                 "reset", Map.of("name", name, "link", link));
     }
 

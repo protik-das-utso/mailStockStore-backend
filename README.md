@@ -6,15 +6,14 @@ Reseller marketplace for digital assets. Sellers submit → Admin reviews → In
 - Java 21, Spring Boot 3.3
 - Spring Security + JWT (access + refresh)
 - Spring Data JPA + Flyway (PostgreSQL)
-- Spring Data Redis (cache, rate limiting)
 - Spring Mail (SMTP) + Thymeleaf email templates
-- Bucket4j rate limiting
+- Bucket4j rate limiting (in-memory, per instance)
 - springdoc-openapi (Swagger UI at `/swagger-ui.html`)
 
 ## Run locally
 
 1. Copy env: `cp .env.example .env` and fill values.
-2. Start Postgres + Redis (your own docker-compose).
+2. Start Postgres (your own docker-compose).
 3. Export env vars, then: `mvn spring-boot:run`
 4. Swagger: http://localhost:8080/swagger-ui.html
 

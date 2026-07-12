@@ -37,9 +37,7 @@ public class TelegramBotRegistrar {
     private final TelegramLinkService links;
     private final BotApiClient api;
     private final SettingRepository settings;
-
-    @Value("${app.uploads-dir:./data/uploads}")
-    private String uploadsDir;
+    private final store.mailstock.media.MediaService media;
 
     private volatile MailStockBot bot;
     private volatile BotSession session;
@@ -81,7 +79,7 @@ public class TelegramBotRegistrar {
         }
         stop(); // clear any dead session before re-registering
         try {
-            MailStockBot b = new MailStockBot(props.getBotToken(), props.getBotUsername(), links, api, settings, uploadsDir);
+            MailStockBot b = new MailStockBot(props.getBotToken(), props.getBotUsername(), links, api, settings, media);
             BotSession s = new TelegramBotsApi(DefaultBotSession.class).registerBot(b);
             this.bot = b;
             this.session = s;

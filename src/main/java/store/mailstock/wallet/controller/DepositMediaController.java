@@ -1,7 +1,6 @@
 package store.mailstock.wallet.controller;
 
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
@@ -12,41 +11,34 @@ import org.springframework.web.multipart.MultipartFile;
 
 import store.mailstock.common.dto.ApiResponse;
 import store.mailstock.common.exception.ApiException;
-import store.mailstock.setting.entity.Setting;
-import store.mailstock.setting.repo.SettingRepository;
+import store.mailstock.media.MediaService;
 
 import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
 
 /**
  * The Binance Pay QR shown to buyers on the deposit page. Admins replace it via an upload in the
- * dashboard; the uploaded image is stored under {@code app.uploads-dir}. Until one is uploaded, the
- * image bundled in the jar (resources/images) is served as the default.
+ * dashboard; the image is stored in the database (see {@link MediaService}) so it survives redeploys —
+ * it used to live on the container filesystem, which is wiped on every deploy. Until one is uploaded,
+ * the image bundled in the jar (resources/images) is served as the default.
  */
 @RestController
 @RequiredArgsConstructor
 public class DepositMediaController {
 
-    private static final String QR_FILE = "deposit-qr";
-    private static final String QR_TYPE_KEY = "deposit.qr_type";
+    private static final String QR_NAME = "deposit-qr";
     private static final String BUNDLED_FALLBACK = "images/binance qr.jpg";
 
-    private final SettingRepository settings;
-
-    @Value("${app.uploads-dir:./data/uploads}")
-    private String uploadsDir;
+    private final MediaService media;
 
     /** Public: the current deposit QR (uploaded one if present, else the bundled default). */
     @GetMapping(value = "/api/public/deposit-qr")
     public ResponseEntity<byte[]> depositQr() throws Exception {
-        Path uploaded = Path.of(uploadsDir, QR_FILE);
-        if (Files.exists(uploaded)) {
-            String type = settings.findById(QR_TYPE_KEY).map(Setting::getValue).orElse(MediaType.IMAGE_PNG_VALUE);
+        var uploaded = media.find(QR_NAME);
+        if (uploaded.isPresent()) {
             return ResponseEntity.ok()
                     .cacheControl(CacheControl.noCache())
-                    .contentType(MediaType.parseMediaType(type))
-                    .body(Files.readAllBytes(uploaded));
+                    .contentType(MediaType.parseMediaType(uploaded.get().getContentType()))
+                    .body(uploaded.get().getData());
         }
         ClassPathResource res = new ClassPathResource(BUNDLED_FALLBACK);
         if (!res.exists()) return ResponseEntity.notFound().build();
@@ -65,12 +57,7 @@ public class DepositMediaController {
         if (file == null || file.isEmpty()) throw ApiException.badRequest("No file uploaded");
         String type = file.getContentType();
         if (type == null || !type.startsWith("image/")) throw ApiException.badRequest("Please upload an image file");
-        Path dir = Path.of(uploadsDir);
-        Files.createDirectories(dir);
-        Files.write(dir.resolve(QR_FILE), file.getBytes());
-        Setting s = settings.findById(QR_TYPE_KEY).orElseGet(() -> Setting.builder().key(QR_TYPE_KEY).build());
-        s.setValue(type);
-        settings.save(s);
+        media.save(QR_NAME, type, file.getBytes());
         return ApiResponse.ok("Deposit QR updated");
     }
 }

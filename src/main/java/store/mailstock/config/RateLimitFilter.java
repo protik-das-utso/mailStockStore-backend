@@ -27,8 +27,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *    at the stricter {@code sensitive-requests-per-minute}.
  *
  * The bucket map is swept periodically so idle client entries don't accumulate unbounded.
- * Note: this is per-instance only. Behind a load balancer or with multiple replicas, move the
- * buckets to the already-available Redis (bucket4j-redis) for a shared limit.
+ * Note: this is per-instance only. Behind a load balancer or with multiple replicas, back the
+ * buckets with a shared store (e.g. bucket4j-redis) so the limit is enforced across instances.
  */
 @Component
 @Order(1)

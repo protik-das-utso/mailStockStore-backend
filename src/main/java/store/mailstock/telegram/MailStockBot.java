@@ -44,14 +44,14 @@ import store.mailstock.submission.entity.AccountCategory;
 public class MailStockBot extends TelegramLongPollingBot {
 
     private static final String PAY_ID_KEY = "deposit.binance_pay_id";
-    private static final String QR_FILE = "deposit-qr";
+    private static final String QR_NAME = "deposit-qr";
     private static final String BUNDLED_QR = "images/binance qr.jpg";
 
     private final String username;
     private final TelegramLinkService links;
     private final BotApiClient api;
     private final SettingRepository settings;
-    private final String uploadsDir;
+    private final store.mailstock.media.MediaService media;
 
     private enum Step { NONE, LINK_CODE, DEPOSIT_AMOUNT, DEPOSIT_TXID,
         SELL_EMAIL, SELL_PASSWORD, SELL_COUNTRY, SELL_2FA,
@@ -74,13 +74,13 @@ public class MailStockBot extends TelegramLongPollingBot {
     private final ConcurrentHashMap<Long, Session> sessions = new ConcurrentHashMap<>();
 
     public MailStockBot(String botToken, String username, TelegramLinkService links, BotApiClient api,
-                        SettingRepository settings, String uploadsDir) {
+                        SettingRepository settings, store.mailstock.media.MediaService media) {
         super(botToken);
         this.username = username;
         this.links = links;
         this.api = api;
         this.settings = settings;
-        this.uploadsDir = uploadsDir;
+        this.media = media;
     }
 
     @Override public String getBotUsername() { return username; }
@@ -536,8 +536,8 @@ public class MailStockBot extends TelegramLongPollingBot {
     /** Current deposit QR bytes — the admin-uploaded image if present, else the bundled default. */
     private byte[] resolveQr() {
         try {
-            Path uploaded = Path.of(uploadsDir, QR_FILE);
-            if (Files.exists(uploaded)) return Files.readAllBytes(uploaded);
+            var uploaded = media.find(QR_NAME);
+            if (uploaded.isPresent()) return uploaded.get().getData();
             ClassPathResource res = new ClassPathResource(BUNDLED_QR);
             if (res.exists()) { try (InputStream in = res.getInputStream()) { return in.readAllBytes(); } }
         } catch (Exception e) {
