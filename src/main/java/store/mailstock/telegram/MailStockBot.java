@@ -142,6 +142,7 @@ public class MailStockBot extends TelegramLongPollingBot {
             case "/cart" -> showCart(chatId, s);
             case "/support", "/ticket" -> startTicket(chatId, s);
             case "/warranty" -> startWarranty(chatId);
+            case "/profile", "/me" -> showProfile(chatId);
             case "/cancel" -> { resetConv(s); send(chatId, "Cancelled.", menuOnly()); }
             default -> send(chatId,
                     "🤔 I didn't understand *" + safe(text) + "*.\nUse the menu below or type /menu.",
@@ -151,7 +152,7 @@ public class MailStockBot extends TelegramLongPollingBot {
 
     private void handleConversation(Long chatId, Session s, String text, Integer messageId) {
         switch (s.step) {
-            case LINK_CODE -> { doLinkCode(chatId, text); resetConv(s); }
+            case LINK_CODE -> { doLinkCode(chatId, extractLinkCode(text)); resetConv(s); }
             case DEPOSIT_AMOUNT -> {
                 BigDecimal amt = parseAmount(text);
                 if (amt == null) { send(chatId, "Enter a valid amount, e.g. `25`.", cancelKb()); return; }
@@ -263,6 +264,7 @@ public class MailStockBot extends TelegramLongPollingBot {
                 case "help", "guide" -> showHelp(chatId);
                 case "support" -> startTicket(chatId, s);
                 case "warranty" -> startWarranty(chatId);
+                case "profile" -> showProfile(chatId);
                 case "cart" -> showCart(chatId, s);
                 case "checkout" -> checkout(chatId, s);
                 case "cartclear" -> clearCart(chatId, s);
@@ -456,6 +458,41 @@ public class MailStockBot extends TelegramLongPollingBot {
         send(chatId, "_Keep these safe — you can view them again any time under 📧 My Emails._",
                 rows(List.of(btn("📧 My Emails", "act:emails")),
                         List.of(btn("🛍 Browse more", "act:browse"), btn("🏠 Menu", "act:menu"))));
+    }
+
+    /** In-bot profile card: who you're connected as (name, email, role, balance) without leaving Telegram. */
+    private void showProfile(Long chatId) {
+        User u = requireUser(chatId); if (u == null) return;
+        String roles = u.getRoles().isEmpty() ? "—"
+                : u.getRoles().stream().map(r -> {
+                    String n = r.name();
+                    return n.charAt(0) + n.substring(1).toLowerCase();
+                }).collect(java.util.stream.Collectors.joining(", "));
+        StringBuilder sb = new StringBuilder("*👤 Your profile*\n\n");
+        sb.append("Name: *").append(safe(blankDash(u.getFullName()))).append("*\n");
+        sb.append("Email: `").append(safe(u.getEmail())).append("`\n");
+        if (u.getPhone() != null && !u.getPhone().isBlank())
+            sb.append("Phone: ").append(safe(u.getPhone())).append("\n");
+        sb.append("Role: ").append(roles).append("\n");
+        sb.append("Email verified: ").append(u.isEmailVerified() ? "✅ yes" : "❌ no").append("\n");
+        if (u.getCreatedAt() != null)
+            sb.append("Member since: ").append(formatDate(u.getCreatedAt())).append("\n");
+        // Wallet balance on the same card — best-effort, never let it break the profile view.
+        try {
+            JsonNode w = api.wallet(u);
+            sb.append("Balance: *$").append(w.path("availableBalance").asText("0")).append("*\n");
+        } catch (Exception ignored) { }
+        send(chatId, sb.toString(), rows(
+                List.of(btn("💰 Wallet", "act:wallet"), btn("📧 My Emails", "act:emails")),
+                List.of(urlBtn("✏️ Edit on website", siteUrl() + "/profile")),
+                List.of(btn("🏠 Menu", "act:menu"))));
+    }
+
+    private static String blankDash(String s) { return (s == null || s.isBlank()) ? "—" : s; }
+
+    private static String formatDate(java.time.Instant i) {
+        return java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy")
+                .withZone(java.time.ZoneOffset.UTC).format(i);
     }
 
     private void showWallet(Long chatId) {
@@ -794,7 +831,7 @@ public class MailStockBot extends TelegramLongPollingBot {
         rows.add(List.of(btn("💰 Wallet & payouts", "act:wallet")));
         rows.add(List.of(btn("🛟 Support", "act:support"), btn("❓ Help", "act:help")));
         if (isBuyer(u)) rows.add(List.of(btn("🛍 Browse & Buy", "act:browse")));
-        rows.add(List.of(urlBtn("👤 Profile", site + "/profile"), urlBtn("⚙️ Settings", site + "/settings")));
+        rows.add(List.of(btn("👤 Profile", "act:profile"), urlBtn("⚙️ Settings", site + "/settings")));
         rows.add(List.of(btn("🚪 Logout", "act:logout")));
         send(chatId, "*🏷 Seller menu*\nManage your submissions and payouts. What would you like to do?", rows);
     }
@@ -807,7 +844,7 @@ public class MailStockBot extends TelegramLongPollingBot {
         rows.add(List.of(btn("🧾 Orders", "act:orders"), btn("📧 My Emails", "act:emails")));
         rows.add(List.of(btn("🛡 Warranty", "act:warranty"), btn("🛟 Support", "act:support")));
         rows.add(List.of(btn("❓ Help / How it works", "act:help")));
-        rows.add(List.of(urlBtn("👤 Profile", site + "/profile"), urlBtn("⚙️ Settings", site + "/settings")));
+        rows.add(List.of(btn("👤 Profile", "act:profile"), urlBtn("⚙️ Settings", site + "/settings")));
         rows.add(List.of(btn("🚪 Logout", "act:logout")));
         send(chatId, "*🛒 MailStock.store*\nYour account marketplace. What would you like to do?", rows);
     }
@@ -827,6 +864,20 @@ public class MailStockBot extends TelegramLongPollingBot {
     }
 
     private void resetConv(Session s) { s.step = Step.NONE; s.data.clear(); }
+
+    /**
+     * Pull the bare code out of whatever the user typed. Tolerates them pasting the full command
+     * form ("/link ABCD1234" or "/start ABCD1234") while the LINK_CODE step is armed — without this,
+     * the entire "/link ABCD1234" string would be treated as the code and rejected as invalid.
+     */
+    private static String extractLinkCode(String text) {
+        String t = text == null ? "" : text.trim();
+        if (t.startsWith("/")) {                       // strip a leading /link or /start command word
+            String[] parts = t.split("\\s+", 2);
+            t = parts.length > 1 ? parts[1].trim() : "";
+        }
+        return t;
+    }
 
     private static BigDecimal parseAmount(String s) {
         try { BigDecimal b = new BigDecimal(s.replace("$", "").replace(",", "").trim()); return b.signum() > 0 ? b : null; }

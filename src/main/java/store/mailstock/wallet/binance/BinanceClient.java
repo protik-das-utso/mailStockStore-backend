@@ -56,7 +56,7 @@ public class BinanceClient {
                 .header("X-MBX-APIKEY", props.getApiKey())
                 .timeout(Duration.ofSeconds(20))
                 .GET().build();
-        log.info("[BINANCE] GET {} (window last {} min, coin {})", PAY_HISTORY_PATH,
+        log.debug("[BINANCE] GET {} (window last {} min, coin {})", PAY_HISTORY_PATH,
                 props.getLookbackMinutes(), props.getCoin());
         try {
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
@@ -91,7 +91,10 @@ public class BinanceClient {
                             text(n, "orderType"), n.path("transactionTime").asLong(0)));
                 }
             }
-            log.info("[BINANCE] parsed {} incoming Pay transaction(s) from history", out.size());
+            // Only worth an INFO line when we actually found money; otherwise stay at DEBUG so the
+            // 2-minute poll doesn't flood the host log with "parsed 0" on every empty cycle.
+            if (out.isEmpty()) log.debug("[BINANCE] parsed 0 incoming Pay transaction(s) from history");
+            else log.info("[BINANCE] parsed {} incoming Pay transaction(s) from history", out.size());
             return out;
         } catch (Exception e) {
             log.warn("[BINANCE] pay history poll failed: {}", e.toString());

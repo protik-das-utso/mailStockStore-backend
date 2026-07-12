@@ -43,9 +43,14 @@ public class WalletService {
                 wallets.save(Wallet.builder().userId(userId).build()));
     }
 
-    @Transactional(readOnly = true)
+    // NOT readOnly: a buyer may have no wallet row yet, in which case this lazily creates one
+    // (INSERT). A read-only transaction would fail with "cannot execute INSERT in a read-only
+    // transaction". Callers reach this through the Spring proxy, so this method's writable
+    // transaction governs the insert.
+    @Transactional
     public Wallet get(Long userId) {
-        return wallets.findByUserId(userId).orElseGet(() -> createForSeller(userId));
+        return wallets.findByUserId(userId).orElseGet(() ->
+                wallets.save(Wallet.builder().userId(userId).build()));
     }
 
     /**
@@ -129,7 +134,9 @@ public class WalletService {
         return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 
-    @Transactional(readOnly = true)
+    // NOT readOnly: get(userId) below may lazily INSERT a wallet on first view (buyer with no
+    // wallet yet). Because get() is called as a self-invocation, this method's transaction governs.
+    @Transactional
     public Page<WalletTransaction> transactions(Long userId, Pageable p) {
         return txRepo.findByWalletIdOrderByIdDesc(get(userId).getId(), p);
     }

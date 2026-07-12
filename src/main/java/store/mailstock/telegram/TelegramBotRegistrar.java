@@ -118,12 +118,23 @@ public class TelegramBotRegistrar {
         stop();
     }
 
-    /** Self-heal: if the bot should be on but isn't connected, try again every minute. */
+    /**
+     * Self-heal + cross-instance sync, every minute. Re-reads the persisted on/off state from the DB
+     * so a toggle made on ANY backend instance propagates to all of them, then converges this instance:
+     *  - should be ON but isn't connected  → (re)connect
+     *  - should be OFF but is still running → stop the poller
+     * Without the OFF branch, a second instance (Railway replica / leftover deploy) would keep polling
+     * after an admin turned the bot off elsewhere, so the bot appears "still running".
+     */
     @Scheduled(fixedDelay = 60_000, initialDelay = 60_000)
-    public void watchdog() {
+    public synchronized void watchdog() {
+        desiredEnabled = readDesired(); // pick up a toggle made on another instance
         if (desiredEnabled && !isRunning() && isTokenPresent()) {
             log.info("[TELEGRAM] watchdog: bot should be running but isn't — reconnecting…");
             start();
+        } else if (!desiredEnabled && isRunning()) {
+            log.info("[TELEGRAM] watchdog: bot disabled in settings — stopping this instance's poller");
+            stop();
         }
     }
 
