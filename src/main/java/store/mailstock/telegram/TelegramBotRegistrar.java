@@ -2,6 +2,7 @@ package store.mailstock.telegram;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import jakarta.annotation.PreDestroy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -103,6 +104,18 @@ public class TelegramBotRegistrar {
         }
         session = null;
         bot = null;
+    }
+
+    /**
+     * Release the Telegram long-poll the instant this instance shuts down (e.g. a Render redeploy sends
+     * SIGTERM). Without this the dying container keeps polling getUpdates until the JVM is killed, so the
+     * NEW container's poll collides with it → the "[409] Conflict: terminated by other getUpdates" error.
+     * Stopping here hands the token over cleanly so the replacement connects without a fight.
+     */
+    @PreDestroy
+    public void onShutdown() {
+        log.info("[TELEGRAM] shutting down — releasing bot poll");
+        stop();
     }
 
     /** Self-heal: if the bot should be on but isn't connected, try again every minute. */

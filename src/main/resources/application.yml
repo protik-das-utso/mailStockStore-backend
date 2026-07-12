@@ -64,6 +64,9 @@ app:
       # new 7-day token issued), so any activity within 7 days slides the window forward — a user who
       # opens the app at least once a week stays logged in; 7 days of inactivity ends the session.
       refresh-token-ttl-days: ${JWT_REFRESH_TTL:7}
+    # Env-only key that encrypts recovery-mailbox POP3 passwords at rest (AES-GCM). No default: the app
+    # must fail fast if it's missing, so we never persist those credentials in plaintext.
+    recovery-enc-key: ${RECOVERY_ENC_KEY}
     cors:
       allowed-origins: ${CORS_ORIGINS:http://localhost:3000}
   rate-limit:

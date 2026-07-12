@@ -117,6 +117,15 @@ public class MailStockBot extends TelegramLongPollingBot {
 
         String cmd = text.split("\\s+")[0].toLowerCase();
         String arg = text.contains(" ") ? text.substring(text.indexOf(' ') + 1).trim() : "";
+
+        // Gate: the bot is unusable until the chat is linked to an account. Only connection/help/nav
+        // commands work before that — everything else replies with clear connect-first instructions.
+        boolean open = switch (cmd) {
+            case "/start", "/menu", "/help", "/guide", "/howto", "/link", "/cancel" -> true;
+            default -> false;
+        };
+        if (!open && links.resolveUser(chatId).isEmpty()) { promptConnect(chatId); return; }
+
         switch (cmd) {
             case "/start" -> { if (!arg.isBlank()) doLinkCode(chatId, arg); else sendMenu(chatId); }
             case "/menu" -> sendMenu(chatId);
@@ -127,6 +136,7 @@ public class MailStockBot extends TelegramLongPollingBot {
             case "/wallet" -> showWallet(chatId);
             case "/deposit" -> startDeposit(chatId, s);
             case "/sell" -> startSell(chatId, s);
+            case "/submissions" -> showSubmissions(chatId);
             case "/orders" -> showOrders(chatId);
             case "/myemails" -> showMyEmails(chatId);
             case "/cart" -> showCart(chatId, s);
@@ -235,6 +245,9 @@ public class MailStockBot extends TelegramLongPollingBot {
         ack(cq.getId());
         Session s = sessions.computeIfAbsent(chatId, k -> new Session());
 
+        // Gate: block every action for an unconnected chat except navigation/help/connect taps.
+        if (!isOpenAction(data) && links.resolveUser(chatId).isEmpty()) { promptConnect(chatId); return; }
+
         // Any navigation/menu tap cancels an in-progress flow (context switch).
         if (data.startsWith("act:")) {
             resetConv(s);
@@ -246,6 +259,7 @@ public class MailStockBot extends TelegramLongPollingBot {
                 case "orders" -> showOrders(chatId);
                 case "emails" -> showMyEmails(chatId);
                 case "sell" -> startSell(chatId, s);
+                case "submissions" -> showSubmissions(chatId);
                 case "help", "guide" -> showHelp(chatId);
                 case "support" -> startTicket(chatId, s);
                 case "warranty" -> startWarranty(chatId);
@@ -276,16 +290,54 @@ public class MailStockBot extends TelegramLongPollingBot {
     }
 
     // ---------- flows ----------
+    /** Actions usable BEFORE connecting: navigation, help, and the connect flow itself. */
+    private static boolean isOpenAction(String data) {
+        if (!data.startsWith("act:")) return false; // cat:/item:/buy:/… always need a connected account
+        return switch (data.substring(4)) {
+            case "menu", "home", "help", "guide", "linkcode", "cancel" -> true;
+            default -> false;
+        };
+    }
+
+    /** Clear connect-first instructions, shown whenever an unconnected chat tries to do anything. */
+    private void promptConnect(Long chatId) {
+        String site = siteUrl();
+        send(chatId, "🔒 *Connect your account first*\n\n"
+                + "This bot works once you link it to your MailStock account. It takes a few seconds:\n\n"
+                + "1️⃣ Create a free account (or log in) on the website.\n"
+                + "2️⃣ Open *Profile → Connect Telegram*.\n"
+                + "3️⃣ Tap *Open bot* / scan the QR — or copy the code and tap *🔗 Connect with code* below and send it here.\n\n"
+                + "Once connected, you'll get a menu tailored to your account (buyer or seller).",
+                rows(List.of(urlBtn("🌐 Create account / log in", site + "/register")),
+                        List.of(btn("🔗 Connect with code", "act:linkcode"), btn("❓ How it works", "act:help"))));
+    }
+
     private void startLinkCode(Long chatId, Session s) {
         s.step = Step.LINK_CODE; s.data.clear();
-        send(chatId, "🔗 *Connect with a code*\nGet a code on the website (Profile → Connect Telegram) and send it here:",
-                cancelKb());
+        send(chatId, "🔗 *Connect with a code*\n\nOn the website open *Profile → Connect Telegram* — from there you can tap "
+                + "*Open bot* (connects instantly) or *scan the QR*, or copy the code and send it here.\n\n"
+                + "Don't have an account yet? Create one first.",
+                rows(List.of(urlBtn("🌐 Open website", siteUrl())), List.of(btn("✖️ Cancel", "act:cancel"))));
     }
 
     private void doLinkCode(Long chatId, String code) {
-        User u = links.consumeCode(code, chatId); // throws ApiException with a clear reason on failure
-        send(chatId, "✅ Connected as *" + safe(u.getEmail()) + "*.");
-        sendMenu(chatId);
+        Optional<User> already = links.resolveUser(chatId);
+        try {
+            User u = links.consumeCode(code, chatId); // throws ApiException with a clear reason on failure
+            boolean switched = already.isPresent() && !already.get().getId().equals(u.getId());
+            send(chatId, "✅ Connected as *" + safe(u.getEmail()) + "*."
+                    + (switched ? "\n_Switched from " + safe(already.get().getEmail()) + "._" : ""));
+            sendMenu(chatId);
+        } catch (ApiException e) {
+            // Opening the deep link again (code already consumed) shouldn't look like a failure when the
+            // chat is already linked — just reassure. A genuine first-time failure still surfaces normally.
+            if (already.isPresent()) {
+                send(chatId, "✅ You're already connected as *" + safe(already.get().getEmail()) + "*.");
+                sendMenu(chatId);
+            } else {
+                throw e;
+            }
+        }
     }
 
     private void doLogout(Long chatId, Session s) {
@@ -451,12 +503,66 @@ public class MailStockBot extends TelegramLongPollingBot {
 
     private void startSell(Long chatId, Session s) {
         User u = requireUser(chatId); if (u == null) return;
-        if (u.getRoles().stream().noneMatch(r -> r.name().equals("SELLER"))) {
-            send(chatId, "🏷 Selling needs a *seller* account. Register as a seller on the website first.", menuOnly());
+        if (!isSeller(u)) {
+            send(chatId, "🏷 Selling needs a *seller* account. Register as a seller on the website first.",
+                    rows(List.of(urlBtn("🌐 Become a seller", siteUrl() + "/register")), List.of(btn("🏠 Menu", "act:menu"))));
             return;
         }
         s.step = Step.SELL_EMAIL; s.data.clear();
         send(chatId, "🏷 *List an account*\nSend the *email address*:", cancelKb());
+    }
+
+    /** Seller's submissions list with status, so they can track review progress from the bot. */
+    private void showSubmissions(Long chatId) {
+        User u = requireUser(chatId); if (u == null) return;
+        if (!isSeller(u)) {
+            send(chatId, "📋 Submissions are for *seller* accounts. Register as a seller on the website to start selling.",
+                    rows(List.of(urlBtn("🌐 Become a seller", siteUrl() + "/register")), List.of(btn("🏠 Menu", "act:menu"))));
+            return;
+        }
+        JsonNode content = api.mySubmissions(u).path("content");
+        if (!content.isArray() || content.isEmpty()) {
+            send(chatId, "📋 *Your submissions*\n\nYou haven't submitted any accounts yet. Tap *📤 New submission* to list one.",
+                    rows(List.of(btn("📤 New submission", "act:sell")), List.of(btn("🏠 Menu", "act:menu"))));
+            return;
+        }
+        StringBuilder sb = new StringBuilder("*📋 Your submissions*\n\n");
+        for (JsonNode sub : content) {
+            String email = sub.path("emailAddress").asText("");
+            sb.append("• #").append(sub.path("id").asText("?"))
+              .append(" — ").append(sub.path("provider").asText(""))
+              .append(email.isBlank() ? "" : " · " + safe(maskEmail(email)))
+              .append(" — *$").append(sub.path("askingPrice").asText("?")).append("*")
+              .append(" · ").append(statusLabel(sub.path("status").asText("PENDING"))).append("\n");
+        }
+        sb.append("\n_Manage full details, 2FA and pricing on the website._");
+        send(chatId, sb.toString(), rows(
+                List.of(btn("📤 New submission", "act:sell")),
+                List.of(urlBtn("🌐 Open on website", siteUrl() + "/seller/submissions"), btn("🏠 Menu", "act:menu"))));
+    }
+
+    /** Friendly status wording for a submission's raw enum. */
+    private static String statusLabel(String status) {
+        return switch (status) {
+            case "PENDING" -> "🕓 Pending review";
+            case "CHECKING" -> "🔎 Under review";
+            case "APPROVED", "ACCEPTED" -> "✅ Approved";
+            case "PURCHASED" -> "💵 Paid";
+            case "REJECTED" -> "❌ Rejected";
+            case "COUNTER_OFFERED" -> "💬 Counter offer";
+            case "NEEDS_MODIFY" -> "✏️ Needs changes";
+            default -> status;
+        };
+    }
+
+    /** Mask an email for display: first 3 + *** + last 2 of the local part. */
+    private static String maskEmail(String email) {
+        int at = email.indexOf('@');
+        if (at < 0) return email;
+        String local = email.substring(0, at), domain = email.substring(at);
+        String masked = local.length() <= 5 ? local.charAt(0) + "***"
+                : local.substring(0, 3) + "***" + local.substring(local.length() - 2);
+        return masked + domain;
     }
 
     private void showOrders(Long chatId) {
@@ -523,7 +629,8 @@ public class MailStockBot extends TelegramLongPollingBot {
         send(chatId, txt, rows(
                 List.of(btn("🛟 Open a ticket", "act:support"), btn("🛡 Claim warranty", "act:warranty")),
                 List.of(btn("🛍 Browse & Buy", "act:browse")),
-                linked ? List.of(btn("🏠 Menu", "act:menu")) : List.of(btn("🔗 Connect with code", "act:linkcode"))));
+                linked ? List.of(btn("🏠 Menu", "act:menu"))
+                       : List.of(urlBtn("🌐 Create account", site + "/register"), btn("🔗 Connect with code", "act:linkcode"))));
     }
 
     /** Support: open a ticket. Anyone connected can do this; sellers/buyers alike. */
@@ -664,31 +771,58 @@ public class MailStockBot extends TelegramLongPollingBot {
     }
 
     private void sendMenu(Long chatId) {
-        boolean linked = links.resolveUser(chatId).isPresent();
-        String txt = "*🛒 MailStock.store*\n" + (linked
-                ? "Your account marketplace. What would you like to do?"
-                : "_You're not connected yet. Get a code from the website (Profile → Connect Telegram) and tap Connect below._");
+        Optional<User> linkedUser = links.resolveUser(chatId);
+        boolean linked = linkedUser.isPresent();
+        String site = siteUrl();
+
+        if (!linked) {
+            promptConnect(chatId);
+            return;
+        }
+
+        // Menu is tailored to the account's role: sellers get selling tools, buyers get shopping tools.
+        // A user with both roles sees the seller menu plus a Browse entry so they can still buy.
+        User u = linkedUser.get();
+        if (isSeller(u)) sendSellerMenu(chatId, u, site);
+        else sendBuyerMenu(chatId, site);
+    }
+
+    /** Seller home: submissions, new listing, wallet/payouts, support, profile & settings (on the website). */
+    private void sendSellerMenu(Long chatId, User u, String site) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        rows.add(List.of(btn("📋 My Submissions", "act:submissions"), btn("📤 New submission", "act:sell")));
+        rows.add(List.of(btn("💰 Wallet & payouts", "act:wallet")));
+        rows.add(List.of(btn("🛟 Support", "act:support"), btn("❓ Help", "act:help")));
+        if (isBuyer(u)) rows.add(List.of(btn("🛍 Browse & Buy", "act:browse")));
+        rows.add(List.of(urlBtn("👤 Profile", site + "/profile"), urlBtn("⚙️ Settings", site + "/settings")));
+        rows.add(List.of(btn("🚪 Logout", "act:logout")));
+        send(chatId, "*🏷 Seller menu*\nManage your submissions and payouts. What would you like to do?", rows);
+    }
+
+    /** Buyer home: browse/cart/checkout, wallet & deposit, orders, purchased emails, warranty, support. */
+    private void sendBuyerMenu(Long chatId, String site) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
         rows.add(List.of(btn("🛍 Browse & Buy", "act:browse"), btn("🛒 Cart", "act:cart")));
         rows.add(List.of(btn("💰 Wallet", "act:wallet"), btn("➕ Deposit", "act:deposit")));
         rows.add(List.of(btn("🧾 Orders", "act:orders"), btn("📧 My Emails", "act:emails")));
-        rows.add(List.of(btn("🏷 Sell", "act:sell")));
         rows.add(List.of(btn("🛡 Warranty", "act:warranty"), btn("🛟 Support", "act:support")));
         rows.add(List.of(btn("❓ Help / How it works", "act:help")));
-        rows.add(linked
-                ? List.of(btn("🚪 Logout", "act:logout"))
-                : List.of(btn("🔗 Connect with code", "act:linkcode")));
-        send(chatId, txt, rows);
+        rows.add(List.of(urlBtn("👤 Profile", site + "/profile"), urlBtn("⚙️ Settings", site + "/settings")));
+        rows.add(List.of(btn("🚪 Logout", "act:logout")));
+        send(chatId, "*🛒 MailStock.store*\nYour account marketplace. What would you like to do?", rows);
+    }
+
+    private static boolean isSeller(User u) {
+        return u.getRoles().stream().anyMatch(r -> r.name().equals("SELLER"));
+    }
+    private static boolean isBuyer(User u) {
+        return u.getRoles().stream().anyMatch(r -> r.name().equals("BUYER"));
     }
 
     // ---------- helpers ----------
     private User requireUser(Long chatId) {
         Optional<User> u = links.resolveUser(chatId);
-        if (u.isEmpty()) {
-            send(chatId, "🔒 You need to connect first. Get a code on the website (Profile → Connect Telegram).",
-                    rows(List.of(btn("🔗 Connect with code", "act:linkcode"))));
-            return null;
-        }
+        if (u.isEmpty()) { promptConnect(chatId); return null; }
         return u.get();
     }
 
@@ -703,6 +837,11 @@ public class MailStockBot extends TelegramLongPollingBot {
 
     private static InlineKeyboardButton btn(String text, String data) {
         return InlineKeyboardButton.builder().text(text).callbackData(data).build();
+    }
+
+    /** A button that opens a URL (e.g. the website) instead of firing a callback. */
+    private static InlineKeyboardButton urlBtn(String text, String url) {
+        return InlineKeyboardButton.builder().text(text).url(url).build();
     }
 
     @SafeVarargs

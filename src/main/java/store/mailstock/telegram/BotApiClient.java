@@ -97,6 +97,11 @@ public class BotApiClient {
         return post(u, "/api/submissions", body);
     }
 
+    /** The seller's own submissions (most recent first). */
+    public JsonNode mySubmissions(User u) {
+        return get(u, "/api/submissions/me?size=10");
+    }
+
     public JsonNode myOrders(User u) {
         return get(u, "/api/orders/me?size=5");
     }

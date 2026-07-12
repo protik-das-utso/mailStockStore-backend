@@ -93,6 +93,13 @@
             <artifactId>spring-boot-starter-thymeleaf</artifactId>
         </dependency>
 
+        <!-- Jakarta Mail (POP3 read-only) — used ONLY to read Google recovery-code emails from a
+             platform-owned mailbox (see recovery/). We never send via SMTP; sending stays on Resend. -->
+        <dependency>
+            <groupId>org.eclipse.angus</groupId>
+            <artifactId>angus-mail</artifactId>
+        </dependency>
+
         <!-- Rate limiting -->
         <dependency>
             <groupId>com.bucket4j</groupId>

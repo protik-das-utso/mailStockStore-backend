@@ -1,5 +1,6 @@
 package store.mailstock.config;
 
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -20,6 +21,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.io.IOException;
 import java.util.List;
 
 import store.mailstock.auth.service.CustomUserDetailsService;
@@ -48,9 +50,23 @@ public class SecurityConfig {
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                 .anyRequest().authenticated())
+            // Without this, Spring's default for an unauthenticated request is 403, which the client
+            // cannot tell apart from "logged in but not allowed" — so an expired access token never
+            // triggered a token refresh. Missing/expired credentials must be 401; 403 means denied.
+            .exceptionHandling(e -> e
+                .authenticationEntryPoint((req, res, ex) ->
+                    writeJson(res, HttpServletResponse.SC_UNAUTHORIZED, "Authentication required."))
+                .accessDeniedHandler((req, res, ex) ->
+                    writeJson(res, HttpServletResponse.SC_FORBIDDEN, "You do not have permission to do that.")))
             .authenticationProvider(authProvider())
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
+    }
+
+    private static void writeJson(HttpServletResponse res, int status, String message) throws IOException {
+        res.setStatus(status);
+        res.setContentType("application/json");
+        res.getWriter().write("{\"success\":false,\"message\":\"" + message + "\"}");
     }
 
     @Bean

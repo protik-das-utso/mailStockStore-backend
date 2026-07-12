@@ -64,6 +64,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private int limitFor(HttpServletRequest req) {
         String uri = req.getRequestURI();
         if (uri.startsWith("/api/auth/")) return authPerMinute;
+        // Public, unauthenticated recovery-code lookups hit an external mailbox over POP3 — cap them
+        // per client so the link can't be hammered into a code-scraping / mailbox-DoS tool.
+        if (uri.startsWith("/api/public/recovery/")) return sensitivePerMinute;
         if ("POST".equals(req.getMethod())
                 && (uri.equals("/api/wallet/deposit") || uri.equals("/api/wallet/withdraw"))) {
             return sensitivePerMinute;
