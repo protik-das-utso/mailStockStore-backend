@@ -1,9 +1,18 @@
 server:
-  # Render (and most PaaS) inject the listen port as PORT. Fall back to SERVER_PORT, then 8080 locally.
+  # Render/Railway (and most PaaS) inject the listen port as PORT. Fall back to SERVER_PORT, then 8080.
   port: ${PORT:${SERVER_PORT:8080}}
   forward-headers-strategy: framework
   servlet:
     context-path: /
+  tomcat:
+    threads:
+      # Tomcat defaults to 200 worker threads. Each carries an off-heap stack (see -Xss in the
+      # Dockerfile) plus per-thread buffers, so the default reserves memory this store will never
+      # use — it serves a handful of concurrent requests. 25 is still far more headroom than needed.
+      max: ${TOMCAT_MAX_THREADS:25}
+      min-spare: ${TOMCAT_MIN_SPARE_THREADS:5}
+    # Default is 8192 queued connections; each holds a buffer.
+    max-connections: ${TOMCAT_MAX_CONNECTIONS:200}
 
 spring:
   application:
@@ -17,7 +26,13 @@ spring:
     username: ${DB_USER:postgres}
     password: ${DB_PASSWORD:root}
     hikari:
-      maximum-pool-size: 15
+      # Each pooled connection costs memory on BOTH sides (JVM buffers + a backend process in
+      # Postgres). 15 was never used concurrently; with 25 Tomcat threads, 5 is ample. It also keeps
+      # us well under Railway's Postgres connection limit.
+      maximum-pool-size: ${DB_POOL_SIZE:5}
+      minimum-idle: ${DB_POOL_MIN_IDLE:1}
+      # Hand idle connections back instead of holding all 5 open forever.
+      idle-timeout: 60000
 
   jpa:
     hibernate:

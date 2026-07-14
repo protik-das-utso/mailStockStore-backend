@@ -35,7 +35,7 @@ public class PricingController {
 
     private record TypeConfig(String key, String label, SellerSubmission.Provider provider, AccountCategory category) {}
 
-    // One row per provider × account category. key = "<provider>_<category>" e.g. gmail_new_no_2fa, outlook_y3_plus.
+    // One row per provider × account category. key = "<provider>_<category>" e.g. gmail_new_1_3m_no_2fa, outlook_y3_plus.
     private static final List<TypeConfig> TYPES = buildTypes();
 
     private static List<TypeConfig> buildTypes() {

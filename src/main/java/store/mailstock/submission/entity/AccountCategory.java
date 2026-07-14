@@ -6,7 +6,7 @@ package store.mailstock.submission.entity;
  * 2FA/TOTP secret is {@link #requires2FA required} on submission, and the legacy {@link #legacyType}
  * (OLD/NEW) kept populated so warranty auto-replacement and older reports keep working.
  *
- * The lower-cased enum name is the settings key suffix, e.g. price.gmail_new_no_2fa / sell.outlook_y3_plus.
+ * The lower-cased enum name is the settings key suffix, e.g. price.gmail_new_1_3m_no_2fa / sell.outlook_y3_plus.
  */
 public enum AccountCategory {
     // Fine-grained "brand new" age buckets (added 2026-07-11). Warranty default follows policy:
@@ -20,8 +20,8 @@ public enum AccountCategory {
     NEW_1_3M_NO_2FA("New account · 1–3 months · no 2FA",     false, SellerSubmission.AccountType.NEW, 7),
     NEW_1_3M_2FA   ("New account · 1–3 months · 2FA enabled",true,  SellerSubmission.AccountType.NEW, 7),
 
-    NEW_NO_2FA  ("New account · 0–3 months · no 2FA",       false, SellerSubmission.AccountType.NEW, 7),
-    NEW_2FA     ("New account · 0–3 months · 2FA enabled",  true,  SellerSubmission.AccountType.NEW, 7),
+    // NEW_NO_2FA / NEW_2FA ("0–3 months") were retired in V21 — they overlapped the buckets above.
+    // Existing rows were remapped to NEW_1_3M_*; do not reintroduce these names.
     M3_12_NO_2FA("3–12 months old · no 2FA",                false, SellerSubmission.AccountType.NEW, 7),
     M3_12_2FA   ("3–12 months old · 2FA enabled",           true,  SellerSubmission.AccountType.NEW, 7),
     Y1_3        ("1–3 years old · 2FA enabled",             true,  SellerSubmission.AccountType.OLD, 7),
@@ -40,6 +40,6 @@ public enum AccountCategory {
         this.defaultWarrantyDays = defaultWarrantyDays;
     }
 
-    /** Settings key suffix, e.g. "new_no_2fa" → price.gmail_new_no_2fa. */
+    /** Settings key suffix, e.g. "new_1_3m_no_2fa" → price.gmail_new_1_3m_no_2fa. */
     public String key() { return name().toLowerCase(); }
 }
