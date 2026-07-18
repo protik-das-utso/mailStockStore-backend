@@ -18,17 +18,20 @@ import store.mailstock.media.MediaService;
  * Admin-managed branding images (logo, hero) that the public site renders — editable without a
  * redeploy. Stored in the database (see {@link MediaService}) so they survive redeploys; the old
  * filesystem storage was wiped every deploy. Only whitelisted names are accepted. When nothing is
- * uploaded the endpoint 404s and the frontend falls back to its bundled default asset.
+ * uploaded, the logo falls back to a bundled default (no 404s in the browser console); other
+ * names 404 and the frontend uses its own default asset.
  */
 @RestController
 @RequiredArgsConstructor
 public class SiteMediaController {
 
     private static final Set<String> ALLOWED = Set.of("logo", "hero");
+    /** Bundled fallback served when no admin logo has been uploaded yet. */
+    private static final String DEFAULT_LOGO = "media/default-logo.webp";
 
     private final MediaService media;
 
-    /** Public: serve a branding image if one has been uploaded, else 404 (frontend uses its default). */
+    /** Public: serve a branding image if one has been uploaded, else the bundled default (logo) or 404. */
     @GetMapping("/api/public/media/{name}")
     public ResponseEntity<byte[]> media(@PathVariable String name) {
         if (!ALLOWED.contains(name)) return ResponseEntity.notFound().build();
@@ -37,7 +40,18 @@ public class SiteMediaController {
                         .cacheControl(CacheControl.noCache())
                         .contentType(MediaType.parseMediaType(a.getContentType()))
                         .body(a.getData()))
-                .orElseGet(() -> ResponseEntity.notFound().build());
+                .orElseGet(() -> "logo".equals(name) ? bundledLogo() : ResponseEntity.notFound().build());
+    }
+
+    private ResponseEntity<byte[]> bundledLogo() {
+        try (java.io.InputStream in = new org.springframework.core.io.ClassPathResource(DEFAULT_LOGO).getInputStream()) {
+            return ResponseEntity.ok()
+                    .cacheControl(CacheControl.noCache())
+                    .contentType(MediaType.parseMediaType("image/webp"))
+                    .body(in.readAllBytes());
+        } catch (Exception e) {
+            return ResponseEntity.notFound().build();
+        }
     }
 
     /** Admin: upload/replace a branding image (logo or hero). */

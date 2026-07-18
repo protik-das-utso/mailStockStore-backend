@@ -28,6 +28,7 @@ public class SellerSubmissionService {
     private final WalletService wallet;
     private final NotificationService notifications;
     private final SettingRepository settings;
+    private final store.mailstock.inventory.service.PricingService pricing;
     /** Self-reference (via the Spring proxy) so bulkReview() invokes review() through the transactional proxy,
      *  giving each submission its own transaction — one failure can't roll back the whole batch. */
     private final org.springframework.beans.factory.ObjectProvider<SellerSubmissionService> self;
@@ -117,12 +118,18 @@ public class SellerSubmissionService {
                 .build();
     }
 
-    /** A category is mandatory, and 2FA categories require a non-blank 2FA/TOTP secret. */
+    /** A category is mandatory, 2FA categories require a non-blank 2FA/TOTP secret, and the category
+     *  must currently be buyable (a positive payout price is configured for this provider × category —
+     *  unpriced categories aren't being purchased right now). */
     private store.mailstock.submission.entity.AccountCategory requireValidCategory(SubmissionCreateRequest req) {
         store.mailstock.submission.entity.AccountCategory category = req.accountCategory();
         if (category == null) throw ApiException.badRequest("Account category is required");
         if (category.requires2FA && (req.twoFactorCode() == null || req.twoFactorCode().isBlank()))
             throw ApiException.badRequest("A 2FA/TOTP secret is required for \"" + category.label + "\" accounts");
+        SellerSubmission.Provider provider = req.provider() == null ? SellerSubmission.Provider.GMAIL : req.provider();
+        if (!pricing.isBuyable(provider, category))
+            throw ApiException.badRequest("We're not buying \"" + category.label + "\" (" + provider
+                    + ") accounts right now — this category isn't priced. Please pick another category.");
         return category;
     }
 

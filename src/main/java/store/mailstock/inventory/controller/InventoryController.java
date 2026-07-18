@@ -45,6 +45,13 @@ public class InventoryController {
     }
 
     // Admin
+    /** Admin adds an account directly to inventory — instantly AVAILABLE (on sale). */
+    @PostMapping("/admin")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<InventoryItem> create(@Valid @RequestBody store.mailstock.inventory.dto.InventoryCreateRequest req) {
+        return ApiResponse.ok(svc.adminCreate(req));
+    }
+
     @GetMapping("/admin")
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<PageResponse<InventoryItem>> adminList(

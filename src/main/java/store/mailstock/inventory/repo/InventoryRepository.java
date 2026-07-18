@@ -46,21 +46,37 @@ public interface InventoryRepository extends JpaRepository<InventoryItem, Long> 
             store.mailstock.submission.entity.AccountCategory accountCategory);
     List<InventoryItem> findTop50ByStockStatusOrderByIdDesc(InventoryItem.Status status);
     long countByStockStatus(InventoryItem.Status status);
+    /** Duplicate guard for admin direct-add: is this email (title) already listed/reserved? */
+    boolean existsByTitleIgnoreCaseAndStockStatusIn(String title, List<InventoryItem.Status> statuses);
     long countBySellerIdAndStockStatus(Long sellerId, InventoryItem.Status status);
     long countByStockStatusAndAccountType(InventoryItem.Status status, store.mailstock.submission.entity.SellerSubmission.AccountType accountType);
     long countByStockStatusAndProvider(InventoryItem.Status status, store.mailstock.submission.entity.SellerSubmission.Provider provider);
     long countByStockStatusAndProviderAndAccountType(InventoryItem.Status status, store.mailstock.submission.entity.SellerSubmission.Provider provider, store.mailstock.submission.entity.SellerSubmission.AccountType accountType);
     long countByStockStatusAndProviderAndAccountCategory(InventoryItem.Status status, store.mailstock.submission.entity.SellerSubmission.Provider provider, store.mailstock.submission.entity.AccountCategory accountCategory);
 
-    /** Public browse with optional account-category + provider + free-text (title) filters, newest first. */
+    /**
+     * Public browse with optional account-category + provider + free-text (title) filters, newest first.
+     * {@code sellable} is the set of provider×category keys ("gmail_new_0d_no_2fa"…) that currently have a
+     * positive sell price — items whose category is unpriced (sell = 0/unset) are hidden from buyers.
+     * The key is built in JPQL as lower(provider)||'_'||lower(accountCategory) to match the settings suffix.
+     */
     @org.springframework.data.jpa.repository.Query("select i from InventoryItem i where i.stockStatus = :status "
             + "and (:category is null or i.accountCategory = :category) "
             + "and (:provider is null or i.provider = :provider) "
-            + "and (:q is null or lower(i.title) like lower(concat('%', cast(:q as string), '%'))) order by i.id desc")
+            + "and (:q is null or lower(i.title) like lower(concat('%', cast(:q as string), '%'))) "
+            + "and concat(lower(cast(i.provider as string)), '_', lower(cast(i.accountCategory as string))) in :sellable order by i.id desc")
     Page<InventoryItem> browseFiltered(@org.springframework.data.repository.query.Param("status") InventoryItem.Status status,
                                        @org.springframework.data.repository.query.Param("category") store.mailstock.submission.entity.AccountCategory category,
                                        @org.springframework.data.repository.query.Param("provider") store.mailstock.submission.entity.SellerSubmission.Provider provider,
-                                       @org.springframework.data.repository.query.Param("q") String q, Pageable p);
+                                       @org.springframework.data.repository.query.Param("q") String q,
+                                       @org.springframework.data.repository.query.Param("sellable") java.util.Collection<String> sellable,
+                                       Pageable p);
+
+    @org.springframework.data.jpa.repository.Query("select i from InventoryItem i where i.stockStatus = :status "
+            + "and concat(lower(cast(i.provider as string)), '_', lower(cast(i.accountCategory as string))) in :sellable order by i.id desc")
+    List<InventoryItem> findTop8Sellable(@org.springframework.data.repository.query.Param("status") InventoryItem.Status status,
+                                         @org.springframework.data.repository.query.Param("sellable") java.util.Collection<String> sellable,
+                                         Pageable p);
 
     @org.springframework.data.jpa.repository.Query("select coalesce(sum(i.purchasePrice),0) from InventoryItem i")
     BigDecimal sumPurchase();

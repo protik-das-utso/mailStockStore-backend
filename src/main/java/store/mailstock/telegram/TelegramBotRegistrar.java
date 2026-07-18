@@ -37,6 +37,7 @@ public class TelegramBotRegistrar {
     private final TelegramLinkService links;
     private final BotApiClient api;
     private final SettingRepository settings;
+    private final store.mailstock.inventory.service.PricingService pricing;
     private final store.mailstock.media.MediaService media;
 
     private volatile MailStockBot bot;
@@ -79,7 +80,7 @@ public class TelegramBotRegistrar {
         }
         stop(); // clear any dead session before re-registering
         try {
-            MailStockBot b = new MailStockBot(props.getBotToken(), props.getBotUsername(), links, api, settings, media);
+            MailStockBot b = new MailStockBot(props.getBotToken(), props.getBotUsername(), links, api, settings, pricing, media);
             BotSession s = new TelegramBotsApi(DefaultBotSession.class).registerBot(b);
             this.bot = b;
             this.session = s;

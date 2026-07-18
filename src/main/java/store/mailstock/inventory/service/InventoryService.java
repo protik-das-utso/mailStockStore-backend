@@ -37,6 +37,59 @@ public class InventoryService {
                 .build());
     }
 
+    /**
+     * Admin adds an account they already own straight into inventory — no seller submission,
+     * no payout. The item is created AVAILABLE, i.e. immediately on sale to buyers. Mirrors the
+     * submission path: category-driven 2FA requirement, warranty and default sell price come
+     * from the same admin pricing settings.
+     */
+    @Transactional
+    public InventoryItem adminCreate(store.mailstock.inventory.dto.InventoryCreateRequest req) {
+        var provider = req.provider() == null ? SellerSubmission.Provider.GMAIL : req.provider();
+        var category = req.accountCategory();
+        if (category.requires2FA && (req.twoFactorCode() == null || req.twoFactorCode().isBlank()))
+            throw ApiException.badRequest("A 2FA/TOTP secret is required for \"" + category.label + "\" accounts");
+
+        String email = req.emailAddress().trim();
+        // Same email can't be on sale twice — sold/dead/archived copies don't block re-adding.
+        if (repo.existsByTitleIgnoreCaseAndStockStatusIn(email,
+                java.util.List.of(InventoryItem.Status.AVAILABLE, InventoryItem.Status.RESERVED)))
+            throw ApiException.conflict("An item for " + email + " is already on sale");
+
+        BigDecimal selling = req.sellingPrice() != null ? req.sellingPrice()
+                : pricing.sellPrice(provider, category);
+        if (selling == null)
+            throw ApiException.badRequest("No selling price given and no default price is configured for "
+                    + provider + " / " + category.label);
+
+        StringBuilder creds = new StringBuilder();
+        creds.append("Provider: ").append(provider).append('\n');
+        creds.append("Email: ").append(email).append('\n');
+        creds.append("Password: ").append(req.emailPassword()).append('\n');
+        if (req.twoFactorCode() != null && !req.twoFactorCode().isBlank())
+            creds.append("2FA secret: ").append(req.twoFactorCode()).append('\n');
+        if (req.backupCodes() != null && !req.backupCodes().isBlank())
+            creds.append("Backup codes: ").append(req.backupCodes()).append('\n');
+        if (req.recoveryEmail() != null && !req.recoveryEmail().isBlank())
+            creds.append("Recovery email: ").append(req.recoveryEmail()).append('\n');
+        if (req.country() != null && !req.country().isBlank())
+            creds.append("Country: ").append(req.country()).append('\n');
+        creds.append("Category: ").append(category.label);
+
+        return repo.save(InventoryItem.builder()
+                .title((req.title() != null && !req.title().isBlank()) ? req.title().trim() : email)
+                .category(provider == SellerSubmission.Provider.OUTLOOK ? "Outlook" : "Gmail")
+                .description(req.description())
+                .provider(provider).accountType(category.legacyType)
+                .accountCategory(category).country(req.country())
+                .purchasePrice(req.purchasePrice() == null ? BigDecimal.ZERO : req.purchasePrice())
+                .sellingPrice(selling)
+                .warrantyDays(pricing.warrantyDays(provider, category))
+                .deliveryPayload(creds.toString())
+                .internalNotes(req.internalNotes())
+                .build());
+    }
+
     @Transactional(readOnly = true)
     public InventoryItem get(Long id) {
         return repo.findById(id).orElseThrow(() -> ApiException.notFound("Inventory not found"));
@@ -52,13 +105,18 @@ public class InventoryService {
     @Transactional(readOnly = true)
     public Page<InventoryItem> browse(store.mailstock.submission.entity.AccountCategory category,
                                       SellerSubmission.Provider provider, String q, Pageable p) {
+        // Only categories with a positive sell price are on sale; unpriced ones are hidden from buyers.
+        java.util.Set<String> sellable = pricing.sellableKeys();
+        if (sellable.isEmpty()) return Page.empty(p);
         return repo.browseFiltered(InventoryItem.Status.AVAILABLE, category, provider,
-                (q != null && !q.isBlank()) ? q.trim() : null, p);
+                (q != null && !q.isBlank()) ? q.trim() : null, sellable, p);
     }
 
     @Transactional(readOnly = true)
     public java.util.List<InventoryItem> featured() {
-        return repo.findTop8ByStockStatusOrderByIdDesc(InventoryItem.Status.AVAILABLE);
+        java.util.Set<String> sellable = pricing.sellableKeys();
+        if (sellable.isEmpty()) return java.util.List.of();
+        return repo.findTop8Sellable(InventoryItem.Status.AVAILABLE, sellable, Pageable.ofSize(8));
     }
 
     @Transactional(readOnly = true)

@@ -51,6 +51,7 @@ public class MailStockBot extends TelegramLongPollingBot {
     private final TelegramLinkService links;
     private final BotApiClient api;
     private final SettingRepository settings;
+    private final store.mailstock.inventory.service.PricingService pricing;
     private final store.mailstock.media.MediaService media;
 
     private enum Step { NONE, LINK_CODE, DEPOSIT_AMOUNT, DEPOSIT_TXID,
@@ -74,12 +75,14 @@ public class MailStockBot extends TelegramLongPollingBot {
     private final ConcurrentHashMap<Long, Session> sessions = new ConcurrentHashMap<>();
 
     public MailStockBot(String botToken, String username, TelegramLinkService links, BotApiClient api,
-                        SettingRepository settings, store.mailstock.media.MediaService media) {
+                        SettingRepository settings, store.mailstock.inventory.service.PricingService pricing,
+                        store.mailstock.media.MediaService media) {
         super(botToken);
         this.username = username;
         this.links = links;
         this.api = api;
         this.settings = settings;
+        this.pricing = pricing;
         this.media = media;
     }
 
@@ -355,9 +358,17 @@ public class MailStockBot extends TelegramLongPollingBot {
     /** Step 1 of buying: pick a category. Buyers choose the account age / 2FA profile they want. */
     private void showCategories(Long chatId) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        // Only show categories that are actually on sale (a positive sell price for some provider).
         for (store.mailstock.submission.entity.AccountCategory c : store.mailstock.submission.entity.AccountCategory.values())
-            rows.add(List.of(btn(c.label, "cat:" + c.name())));
+            if (pricing.isSellable(store.mailstock.submission.entity.SellerSubmission.Provider.GMAIL, c)
+                    || pricing.isSellable(store.mailstock.submission.entity.SellerSubmission.Provider.OUTLOOK, c))
+                rows.add(List.of(btn(c.label, "cat:" + c.name())));
         rows.add(List.of(btn("🏠 Menu", "act:menu")));
+        if (rows.size() == 1) {
+            send(chatId, "*🛍 Browse & Buy*\n\n😔 No accounts are on sale right now. Please check back soon.",
+                    rows(List.of(btn("🏠 Menu", "act:menu"))));
+            return;
+        }
         send(chatId, "*🛍 Browse & Buy*\n\nChoose the type of account you're looking for:", rows);
     }
 
@@ -557,9 +568,16 @@ public class MailStockBot extends TelegramLongPollingBot {
         // Step 1 (mirrors the website): choose the account category. The price and warranty are FIXED
         // per category by the admin — the seller is never asked for a price.
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        // Only offer categories we're actually buying (a positive payout price). Bot lists Gmail.
         for (AccountCategory c : AccountCategory.values())
-            rows.add(List.of(btn(c.label, "scat:" + c.name())));
+            if (pricing.isBuyable(store.mailstock.submission.entity.SellerSubmission.Provider.GMAIL, c))
+                rows.add(List.of(btn(c.label, "scat:" + c.name())));
         rows.add(List.of(btn("🏠 Menu", "act:menu")));
+        if (rows.size() == 1) {
+            send(chatId, "🏷 *List an account*\n\nWe're not buying any accounts right now — no categories are priced. "
+                    + "Please check back soon.", rows(List.of(btn("🏠 Menu", "act:menu"))));
+            return;
+        }
         send(chatId, "🏷 *List an account*\n\nFirst pick the *category* of the account you're selling. "
                 + "The payout is set automatically by category (same as the website).", rows);
     }

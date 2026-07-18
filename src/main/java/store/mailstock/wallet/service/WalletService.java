@@ -39,12 +39,12 @@ public class WalletService {
     private final store.mailstock.setting.repo.SettingRepository settings;
 
     /** Smallest amount a seller may withdraw. Admin-configurable via the {@code site.min_withdraw}
-     *  setting; defaults to $5 when unset or unparseable. */
+     *  setting; defaults to $2 when unset or unparseable. */
     private BigDecimal minWithdraw() {
         return settings.findById("site.min_withdraw")
-                .map(s -> { try { return new BigDecimal(s.getValue().trim()); } catch (RuntimeException e) { return new BigDecimal("5"); } })
+                .map(s -> { try { return new BigDecimal(s.getValue().trim()); } catch (RuntimeException e) { return new BigDecimal("2"); } })
                 .filter(v -> v.signum() > 0)
-                .orElse(new BigDecimal("5"));
+                .orElse(new BigDecimal("2"));
     }
 
     @Transactional
