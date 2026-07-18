@@ -97,7 +97,9 @@ public class OrderService {
         order = orders.save(order);
 
         notifications.notify(buyerId, "ORDER_DELIVERED", "Order delivered",
-                "Your order #" + order.getId() + " is ready in your dashboard.");
+                "Your order #" + order.getId() + " is ready in your dashboard. "
+                        + "Warranty notice: do not change the password or any security options "
+                        + "within the first 24 hours after delivery — doing so voids the warranty.");
         notifications.notifyAdmins("NEW_ORDER", "New order",
                 "Order #" + order.getId() + " paid from balance: " + payable);
 
@@ -207,7 +209,9 @@ public class OrderService {
         notifications.notify(req.userId(), "MANUAL_DELIVERY", "Email delivered",
                 "An email was delivered to your account (order #" + order.getId() + ")."
                         + (req.chargeBalance() ? " " + price + " was charged from your balance." : "")
-                        + (req.note() != null && !req.note().isBlank() ? " Note: " + req.note() : ""));
+                        + (req.note() != null && !req.note().isBlank() ? " Note: " + req.note() : "")
+                        + " Warranty notice: do not change the password or any security options"
+                        + " within the first 24 hours after delivery — doing so voids the warranty.");
         notifications.notifyAdmins("MANUAL_DELIVERY", "Manual delivery",
                 "Order #" + order.getId() + " manually delivered to user " + req.userId()
                         + (req.chargeBalance() ? " (charged " + price + ")" : " (free)"));

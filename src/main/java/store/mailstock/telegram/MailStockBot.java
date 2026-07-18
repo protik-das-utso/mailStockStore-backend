@@ -469,7 +469,9 @@ public class MailStockBot extends TelegramLongPollingBot {
                 send(chatId, "```\n" + (creds.isBlank() ? "Credentials will appear under My Emails shortly." : creds) + "\n```");
             }
         }
-        send(chatId, "_Keep these safe — you can view them again any time under 📧 My Emails._",
+        send(chatId, "⚠️ *Warranty notice:* do not change the password or any security options within "
+                + "the first 24 hours after delivery — doing so voids the warranty.\n\n"
+                + "_Keep these safe — you can view them again any time under 📧 My Emails._",
                 rows(List.of(btn("📧 My Emails", "act:emails")),
                         List.of(btn("🛍 Browse more", "act:browse"), btn("🏠 Menu", "act:menu"))));
     }
@@ -698,7 +700,9 @@ public class MailStockBot extends TelegramLongPollingBot {
             return;
         }
         int total = arr.size();
-        send(chatId, "*📧 Your accounts* (" + total + ")\nHere are the login details for everything you've bought:");
+        send(chatId, "*📧 Your accounts* (" + total + ")\nHere are the login details for everything you've bought:\n\n"
+                + "⚠️ _Warranty notice: do not change the password or any security options within "
+                + "the first 24 hours after delivery — doing so voids the warranty._");
         int shown = 0;
         for (JsonNode e : arr) {
             if (shown >= 20) { send(chatId, "_Showing your 20 most recent. Open the website to see the rest._"); break; }
