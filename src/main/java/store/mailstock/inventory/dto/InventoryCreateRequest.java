@@ -20,6 +20,7 @@ public record InventoryCreateRequest(
         @Size(max = 5000) String backupCodes,
         @NotNull AccountCategory accountCategory,
         @Size(max = 80) String country,
+        @Min(1990) @Max(2100) Integer accountCreationYear,   // e.g. 2015 (optional)
         @Email @Size(max = 255) String recoveryEmail,
 
         @Size(max = 200) String title,                   // defaults to the email address

@@ -21,6 +21,7 @@ public record BrowseItemResponse(
         AccountCategory accountCategory,
         String accountCategoryLabel,
         String country,
+        Integer accountCreationYear,
         BigDecimal sellingPrice,
         Integer warrantyDays,
         InventoryItem.Status stockStatus
@@ -39,6 +40,7 @@ public record BrowseItemResponse(
                 i.getAccountCategory(),
                 i.getAccountCategory() != null ? i.getAccountCategory().label : null,
                 i.getCountry(),
+                i.getAccountCreationYear(),
                 price,
                 i.getWarrantyDays(),
                 i.getStockStatus()

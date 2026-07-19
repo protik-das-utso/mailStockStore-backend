@@ -32,6 +32,7 @@ public class InventoryService {
                 .title(s.getTitle()).category(s.getCategory()).description(s.getDescription())
                 .provider(s.getProvider()).accountType(s.getAccountType())
                 .accountCategory(s.getAccountCategory()).country(s.getCountry())
+                .accountCreationYear(s.getAccountCreationYear())
                 .purchasePrice(purchase).sellingPrice(selling)
                 .warrantyDays(warrantyDays)
                 .deliveryPayload(deliveryPayload).internalNotes(internalNotes)
@@ -86,6 +87,7 @@ public class InventoryService {
                 .description(req.description())
                 .provider(provider).accountType(category.legacyType)
                 .accountCategory(category).country(req.country())
+                .accountCreationYear(req.accountCreationYear())
                 .purchasePrice(req.purchasePrice() == null ? BigDecimal.ZERO : req.purchasePrice())
                 .sellingPrice(selling)  // can be NULL — will resolve dynamically at browse time
                 .warrantyDays(pricing.warrantyDays(provider, category))

@@ -24,6 +24,7 @@ public class InventoryItem {
     @Enumerated(EnumType.STRING) @Column(length = 10) private store.mailstock.submission.entity.SellerSubmission.AccountType accountType;
     @Enumerated(EnumType.STRING) @Column(length = 20) private store.mailstock.submission.entity.AccountCategory accountCategory;
     @Column(length = 80) private String country;
+    private Integer accountCreationYear;   // e.g. 2015 — copied from the seller submission when known
     @Column(columnDefinition = "TEXT") private String description;
     @Column(nullable = false, precision = 14, scale = 2) private BigDecimal purchasePrice;
     @Column(precision = 14, scale = 2) private BigDecimal sellingPrice;  // NULL = resolve from sell.<provider>_<category>
