@@ -112,7 +112,7 @@ public class OrderService {
     /** Resolve price: use the item's explicit override, else fetch from sell.<provider>_<category> */
     private BigDecimal resolvePrice(InventoryItem i) {
         if (i.getSellingPrice() != null) return i.getSellingPrice();
-        BigDecimal price = inventory.pricing.sellPrice(i.getProvider(), i.getAccountCategory());
+        BigDecimal price = pricing.sellPrice(i.getProvider(), i.getAccountCategory());
         if (price == null || price.signum() <= 0)
             throw ApiException.badRequest("No price configured for " + i.getTitle());
         return price;
@@ -233,14 +233,5 @@ public class OrderService {
                         + ",\"charged\":" + req.chargeBalance() + "}", null);
 
         return order;
-    }
-
-    /** Resolve price: use the item's explicit override, else fetch from sell.<provider>_<category> */
-    private BigDecimal resolvePrice(InventoryItem i) {
-        if (i.getSellingPrice() != null) return i.getSellingPrice();
-        BigDecimal price = pricing.sellPrice(i.getProvider(), i.getAccountCategory());
-        if (price == null || price.signum() <= 0)
-            throw ApiException.badRequest("No price configured for " + i.getTitle());
-        return price;
     }
 }
