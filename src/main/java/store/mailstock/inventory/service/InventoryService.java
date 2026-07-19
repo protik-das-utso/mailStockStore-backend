@@ -134,7 +134,10 @@ public class InventoryService {
         if (req.title() != null) i.setTitle(req.title());
         if (req.category() != null) i.setCategory(req.category());
         if (req.description() != null) i.setDescription(req.description());
-        if (req.sellingPrice() != null) i.setSellingPrice(req.sellingPrice());
+        // Price: "use category price" clears the override (item follows Price & Stocks again);
+        // an explicit sellingPrice locks the item to that fixed price.
+        if (Boolean.TRUE.equals(req.useCategoryPrice())) i.setSellingPrice(null);
+        else if (req.sellingPrice() != null) i.setSellingPrice(req.sellingPrice());
         if (req.warrantyDays() != null) i.setWarrantyDays(req.warrantyDays());
         if (req.deliveryPayload() != null) i.setDeliveryPayload(req.deliveryPayload());
         if (req.internalNotes() != null) i.setInternalNotes(req.internalNotes());
