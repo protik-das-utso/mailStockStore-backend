@@ -27,7 +27,7 @@ class SettingController {
      *  importantly — the abuse auto-flag thresholds (an unauthenticated reader could stay one claim
      *  under the limit forever). {@code price.*} (seller payout) stays public on purpose: the seller
      *  submission form shows it before they submit. */
-    private static final List<String> PRIVATE_PREFIXES = List.of("sell.", "warranty.", "stock.target_", "abuse.", "email.");
+    private static final List<String> PRIVATE_PREFIXES = List.of("sell.", "warranty.", "stock.target_", "abuse.", "email.", "telegram.");
     private static final Set<String> ALWAYS_PUBLIC = Set.of("warranty.policy");
 
     @GetMapping("/public/settings")

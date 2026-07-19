@@ -28,6 +28,7 @@ public class SellerSubmissionService {
     private final WalletService wallet;
     private final NotificationService notifications;
     private final SettingRepository settings;
+    private final store.mailstock.telegram.TelegramNotifier telegramNotifier;
     private final store.mailstock.inventory.service.PricingService pricing;
     /** Self-reference (via the Spring proxy) so bulkReview() invokes review() through the transactional proxy,
      *  giving each submission its own transaction — one failure can't roll back the whole batch. */
@@ -49,6 +50,9 @@ public class SellerSubmissionService {
         SellerSubmission s = repo.save(toEntity(sellerId, req));
         notifications.notifyAdmins("NEW_SUBMISSION", "New seller submission",
                 "Submission #" + s.getId() + " — " + s.getTitle());
+        telegramNotifier.adminAlert("new_submission", "New seller submission",
+                "Submission #" + s.getId() + " — " + s.getTitle()
+                        + (s.getEmailAddress() == null ? "" : "\n" + s.getEmailAddress()));
         return s;
     }
 
@@ -64,6 +68,8 @@ public class SellerSubmissionService {
             saved.add(repo.save(toEntity(sellerId, req)));
         }
         notifications.notifyAdmins("NEW_SUBMISSION", "New seller submissions",
+                saved.size() + " account(s) submitted by seller #" + sellerId);
+        telegramNotifier.adminAlert("new_submission", "New seller submissions",
                 saved.size() + " account(s) submitted by seller #" + sellerId);
         return saved;
     }

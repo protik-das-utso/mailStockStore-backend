@@ -41,6 +41,7 @@ public class AuthService {
     private final AuthenticationManager authManager;
     private final EmailService email;
     private final WalletService walletService;
+    private final store.mailstock.telegram.TelegramNotifier telegramNotifier;
 
     private static final SecureRandom RNG = new SecureRandom();
 
@@ -60,6 +61,10 @@ public class AuthService {
         u = users.save(u);
 
         if (role == Role.SELLER) walletService.createForSeller(u.getId());
+
+        telegramNotifier.adminAlert("new_user",
+                "New " + role.name().toLowerCase() + " registered",
+                u.getFullName() + " — " + u.getEmail());
 
         sendVerificationEmail(u);
     }
