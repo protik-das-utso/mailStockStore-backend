@@ -26,7 +26,7 @@ public class InventoryItem {
     @Column(length = 80) private String country;
     @Column(columnDefinition = "TEXT") private String description;
     @Column(nullable = false, precision = 14, scale = 2) private BigDecimal purchasePrice;
-    @Column(nullable = false, precision = 14, scale = 2) private BigDecimal sellingPrice;
+    @Column(precision = 14, scale = 2) private BigDecimal sellingPrice;  // NULL = resolve from sell.<provider>_<category>
     @Column(nullable = false) @Builder.Default private Integer warrantyDays = 0;
     @Enumerated(EnumType.STRING) @Column(name = "stock_status", nullable = false, length = 20) @Builder.Default
     private Status stockStatus = Status.AVAILABLE;
@@ -37,5 +37,8 @@ public class InventoryItem {
     @LastModifiedDate private Instant updatedAt;
 
     @Transient
-    public BigDecimal getProfit() { return sellingPrice.subtract(purchasePrice); }
+    public BigDecimal getProfit() {
+        if (sellingPrice == null) return null;  // profit unknown until price resolves
+        return sellingPrice.subtract(purchasePrice);
+    }
 }

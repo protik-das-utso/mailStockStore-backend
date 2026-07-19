@@ -41,10 +41,12 @@ public record WarrantyDetailResponse(
     public record Candidate(Long id, String maskedTitle, SellerSubmission.Provider provider,
                             AccountCategory accountCategory, String accountCategoryLabel,
                             String country, BigDecimal sellingPrice) {
-        public static Candidate from(InventoryItem i) {
+        public static Candidate from(InventoryItem i, store.mailstock.inventory.service.PricingService pricing) {
+            BigDecimal price = i.getSellingPrice() != null ? i.getSellingPrice()
+                    : pricing.sellPrice(i.getProvider(), i.getAccountCategory());
             return new Candidate(i.getId(), MaskUtil.maskEmail(i.getTitle()), i.getProvider(),
                     i.getAccountCategory(), i.getAccountCategory() != null ? i.getAccountCategory().label : null,
-                    i.getCountry(), i.getSellingPrice());
+                    i.getCountry(), price);
         }
     }
 }

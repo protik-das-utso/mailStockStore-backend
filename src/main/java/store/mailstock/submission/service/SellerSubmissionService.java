@@ -102,11 +102,16 @@ public class SellerSubmissionService {
         store.mailstock.submission.entity.AccountCategory category = requireValidCategory(req);
         String title = (req.title() != null && !req.title().isBlank()) ? req.title() : req.emailAddress();
         String cat = (req.category() != null && !req.category().isBlank()) ? req.category() : "Gmail";
+        SellerSubmission.Provider provider = req.provider() == null ? SellerSubmission.Provider.GMAIL : req.provider();
+        // Snapshot the buying price at submission time — this is what the admin pays on APPROVE, regardless
+        // of setting changes between now and then. Future price changes only affect new submissions.
+        BigDecimal offeredPayout = pricing.payoutPrice(provider, category);
         return SellerSubmission.builder()
                 .sellerId(sellerId).title(title).category(cat)
-                .provider(req.provider() == null ? SellerSubmission.Provider.GMAIL : req.provider())
+                .provider(provider)
                 .description(req.description())
                 .askingPrice(req.askingPrice() == null ? BigDecimal.ZERO : req.askingPrice())
+                .offeredPayout(offeredPayout)
                 .warrantyDays(req.warrantyDays() == null ? 0 : req.warrantyDays())
                 .supportingFiles(req.supportingFiles()).notes(req.notes())
                 .emailAddress(req.emailAddress()).emailPassword(req.emailPassword())
@@ -175,13 +180,13 @@ public class SellerSubmissionService {
 
         switch (req.action()) {
             case "APPROVE" -> {
-                // Default to the admin-defined price for this provider + category when no explicit price is given.
-                BigDecimal typePayout = priceFor("price", s.getProvider(), s.getAccountCategory(), null);
+                // Pay the seller what was offered when they submitted (offeredPayout), falling back to counterPrice or askingPrice.
+                // This way a Price & Stocks change between submission and approval doesn't change the deal.
                 BigDecimal purchase = req.purchasePrice() != null ? req.purchasePrice()
                         : (s.getCounterPrice() != null ? s.getCounterPrice()
-                        : (typePayout != null ? typePayout : s.getAskingPrice()));
-                BigDecimal selling = req.sellingPrice() != null ? req.sellingPrice()
-                        : priceFor("sell", s.getProvider(), s.getAccountCategory(), purchase.multiply(new BigDecimal("1.20")));
+                        : (s.getOfferedPayout() != null ? s.getOfferedPayout() : s.getAskingPrice()));
+                // Selling price: leave NULL if not explicitly set — it will resolve dynamically from sell.<provider>_<category>
+                BigDecimal selling = req.sellingPrice();
                 // Build the buyer delivery block now (seller creds + any admin extras) and HOLD it on the
                 // submission. Approving buys the account from the seller and pays them; it does NOT list it
                 // for sale — that is the separate "add to inventory" step below.
@@ -242,8 +247,8 @@ public class SellerSubmissionService {
         if (s.getStatus() != SellerSubmission.Status.APPROVED)
             throw ApiException.badRequest("Only approved submissions can be added to inventory");
         BigDecimal purchase = s.getPurchasePrice() != null ? s.getPurchasePrice() : s.getAskingPrice();
-        BigDecimal selling = s.getSellingPrice() != null ? s.getSellingPrice()
-                : priceFor("sell", s.getProvider(), s.getAccountCategory(), purchase.multiply(new BigDecimal("1.20")));
+        // Selling price from the submission — leave NULL if not set, so it follows the live setting
+        BigDecimal selling = s.getSellingPrice();
         String payload = (s.getDeliveryPayload() != null && !s.getDeliveryPayload().isBlank())
                 ? s.getDeliveryPayload() : s.buildCredentialPayload();
         InventoryItem item = inventory.addFromSubmission(s, purchase, selling, payload, s.getInternalNotes());

@@ -26,6 +26,7 @@ public class InventoryService {
                                            String deliveryPayload, String internalNotes) {
         // Warranty is fixed by the account's category (admin-configured), not by what the seller typed.
         int warrantyDays = pricing.warrantyDays(s.getProvider(), s.getAccountCategory());
+        // sellingPrice can be NULL — it will resolve dynamically from sell.<provider>_<category> at browse time
         return repo.save(InventoryItem.builder()
                 .submissionId(s.getId()).sellerId(s.getSellerId())
                 .title(s.getTitle()).category(s.getCategory()).description(s.getDescription())
@@ -56,11 +57,14 @@ public class InventoryService {
                 java.util.List.of(InventoryItem.Status.AVAILABLE, InventoryItem.Status.RESERVED)))
             throw ApiException.conflict("An item for " + email + " is already on sale");
 
-        BigDecimal selling = req.sellingPrice() != null ? req.sellingPrice()
-                : pricing.sellPrice(provider, category);
-        if (selling == null)
-            throw ApiException.badRequest("No selling price given and no default price is configured for "
-                    + provider + " / " + category.label);
+        // Selling price: NULL means follow sell.<provider>_<category>, explicit value locks it
+        BigDecimal selling = req.sellingPrice();
+        if (selling == null) {
+            selling = pricing.sellPrice(provider, category);
+            if (selling == null || selling.signum() <= 0)
+                throw ApiException.badRequest("No selling price given and no default price is configured for "
+                        + provider + " / " + category.label);
+        }
 
         StringBuilder creds = new StringBuilder();
         creds.append("Provider: ").append(provider).append('\n');
@@ -83,7 +87,7 @@ public class InventoryService {
                 .provider(provider).accountType(category.legacyType)
                 .accountCategory(category).country(req.country())
                 .purchasePrice(req.purchasePrice() == null ? BigDecimal.ZERO : req.purchasePrice())
-                .sellingPrice(selling)
+                .sellingPrice(selling)  // can be NULL — will resolve dynamically at browse time
                 .warrantyDays(pricing.warrantyDays(provider, category))
                 .deliveryPayload(creds.toString())
                 .internalNotes(req.internalNotes())

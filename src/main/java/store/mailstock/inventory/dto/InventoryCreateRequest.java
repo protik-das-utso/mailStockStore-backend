@@ -25,6 +25,6 @@ public record InventoryCreateRequest(
         @Size(max = 200) String title,                   // defaults to the email address
         @Size(max = 5000) String description,
         @DecimalMin("0.00") BigDecimal purchasePrice,    // what the account cost us; defaults to 0
-        @DecimalMin("0.01") BigDecimal sellingPrice,     // defaults to the admin sell.<provider>_<category> setting
+        @DecimalMin("0.01") BigDecimal sellingPrice,     // NULL = follow sell.<provider>_<category>; explicit value locks it
         @Size(max = 2000) String internalNotes
 ) {}

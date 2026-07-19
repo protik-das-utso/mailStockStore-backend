@@ -1,5 +1,8 @@
 package store.mailstock.common.util;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+
 /**
  * Privacy masking for values shown to the public before purchase.
  */
@@ -8,11 +11,11 @@ public final class MaskUtil {
     private MaskUtil() {}
 
     /**
-     * Mask an email address, keeping the first 3 and last 2 characters of the local
-     * part (before '@') and the full domain. Examples:
-     *   utso2305101197@diu.edu.bd -> uts***97@diu.edu.bd
-     *   kevin@gmail.com           -> k***@gmail.com   (short local part)
-     * Non-email strings are masked generically (first 3 kept, rest hidden).
+     * Mask an email address using a stable hash so sequential emails can't be guessed.
+     * Instead of "jin***17@gmail.com" revealing the prefix, we show "j***a4b9@gmail.com"
+     * where "a4b9" is a short hash of the full email. Each email gets a unique, unpredictable
+     * mask that stays consistent but reveals no sequence information.
+     * Non-email strings are masked generically (first char kept, rest hidden).
      */
     public static String maskEmail(String value) {
         if (value == null || value.isBlank()) return value;
@@ -22,14 +25,26 @@ public final class MaskUtil {
         String local = value.substring(0, at);
         String domain = value.substring(at); // includes '@'
 
-        if (local.length() <= 5) {
-            // Too short to keep 3 + 2 without revealing most of it: keep first char only.
-            String first = local.substring(0, 1);
-            return first + "***" + domain;
+        // Use first character of local part + 4-char hash of full email + domain
+        String first = local.substring(0, 1);
+        String hash = shortHash(value.toLowerCase().trim());
+        return first + "***" + hash + domain;
+    }
+
+    /**
+     * Generate a short, stable 4-character hex hash from a string.
+     * Uses SHA-256 and takes the first 4 hex chars for brevity.
+     */
+    private static String shortHash(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            // Take first 2 bytes (4 hex chars) for a compact hash
+            return String.format("%02x%02x", digest[0], digest[1]);
+        } catch (Exception e) {
+            // Fallback to simple hashCode if SHA fails
+            return String.format("%04x", input.hashCode() & 0xFFFF).substring(0, 4);
         }
-        String head = local.substring(0, 3);
-        String tail = local.substring(local.length() - 2);
-        return head + "***" + tail + domain;
     }
 
     private static String maskGeneric(String value) {

@@ -39,6 +39,7 @@ public class WarrantyService {
     private final AuditService audit;
     private final store.mailstock.abuse.service.AbuseService abuse;
     private final store.mailstock.auth.repo.UserRepository users;
+    private final store.mailstock.inventory.service.PricingService pricing;
 
     @Transactional
     public WarrantyClaim open(Long buyerId, WarrantyCreateRequest req) {
@@ -185,7 +186,7 @@ public class WarrantyService {
                 : inventory.findTop50ByStockStatusOrderByIdDesc(InventoryItem.Status.AVAILABLE);
 
         var candidates = pool.stream()
-                .map(store.mailstock.warranty.dto.WarrantyDetailResponse.Candidate::from).toList();
+                .map(i -> store.mailstock.warranty.dto.WarrantyDetailResponse.Candidate.from(i, pricing)).toList();
         return new store.mailstock.warranty.dto.WarrantyDetailResponse(
                 c, buyerEmail,
                 store.mailstock.warranty.dto.WarrantyDetailResponse.PurchasedItem.from(oi),

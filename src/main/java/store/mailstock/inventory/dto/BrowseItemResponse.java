@@ -25,7 +25,10 @@ public record BrowseItemResponse(
         Integer warrantyDays,
         InventoryItem.Status stockStatus
 ) {
-    public static BrowseItemResponse from(InventoryItem i) {
+    /** Resolve the selling price: use the item's explicit override, else resolve from pricing service. */
+    public static BrowseItemResponse from(InventoryItem i, store.mailstock.inventory.service.PricingService pricing) {
+        BigDecimal price = i.getSellingPrice() != null ? i.getSellingPrice()
+                : pricing.sellPrice(i.getProvider(), i.getAccountCategory());
         return new BrowseItemResponse(
                 i.getId(),
                 MaskUtil.maskEmail(i.getTitle()),
@@ -36,7 +39,7 @@ public record BrowseItemResponse(
                 i.getAccountCategory(),
                 i.getAccountCategory() != null ? i.getAccountCategory().label : null,
                 i.getCountry(),
-                i.getSellingPrice(),
+                price,
                 i.getWarrantyDays(),
                 i.getStockStatus()
         );

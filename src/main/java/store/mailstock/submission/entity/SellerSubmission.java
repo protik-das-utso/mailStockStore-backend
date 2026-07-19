@@ -48,6 +48,7 @@ public class SellerSubmission {
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 20) @Builder.Default private Status status = Status.PENDING;
     @Column(precision = 14, scale = 2) private BigDecimal counterPrice;
     // --- Approval outcome: the agreed deal, held on the submission until it is pushed to inventory ---
+    @Column(precision = 14, scale = 2) private BigDecimal offeredPayout;   // price.<provider>_<category> at submission time (what we offered to pay)
     @Column(precision = 14, scale = 2) private BigDecimal purchasePrice;   // paid to the seller on approval
     @Column(precision = 14, scale = 2) private BigDecimal sellingPrice;    // intended buyer price when listed
     @Column(columnDefinition = "TEXT") private String deliveryPayload;     // credentials block delivered to the buyer

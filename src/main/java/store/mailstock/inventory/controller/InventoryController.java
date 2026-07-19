@@ -14,6 +14,7 @@ import store.mailstock.inventory.dto.BrowseItemResponse;
 import store.mailstock.inventory.dto.InventoryUpdateRequest;
 import store.mailstock.inventory.entity.InventoryItem;
 import store.mailstock.inventory.service.InventoryService;
+import store.mailstock.inventory.service.PricingService;
 
 @RestController
 @RequestMapping("/api/inventory")
@@ -21,6 +22,7 @@ import store.mailstock.inventory.service.InventoryService;
 public class InventoryController {
 
     private final InventoryService svc;
+    private final PricingService pricing;
 
     // Public browse — masked email, no delivery payload / internal notes ever leave the server.
     @GetMapping("/browse")
@@ -31,17 +33,17 @@ public class InventoryController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return ApiResponse.ok(PageResponse.of(
-                svc.browse(accountCategory, provider, q, PageRequest.of(page, size)).map(BrowseItemResponse::from)));
+                svc.browse(accountCategory, provider, q, PageRequest.of(page, size)).map(i -> BrowseItemResponse.from(i, pricing))));
     }
 
     @GetMapping("/browse/featured")
     public ApiResponse<List<BrowseItemResponse>> featured() {
-        return ApiResponse.ok(svc.featured().stream().map(BrowseItemResponse::from).toList());
+        return ApiResponse.ok(svc.featured().stream().map(i -> BrowseItemResponse.from(i, pricing)).toList());
     }
 
     @GetMapping("/browse/{id}")
     public ApiResponse<BrowseItemResponse> productPage(@PathVariable Long id) {
-        return ApiResponse.ok(BrowseItemResponse.from(svc.get(id)));
+        return ApiResponse.ok(BrowseItemResponse.from(svc.get(id), pricing));
     }
 
     // Admin

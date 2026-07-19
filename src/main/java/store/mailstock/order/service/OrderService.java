@@ -38,6 +38,7 @@ public class OrderService {
     private final NotificationService notifications;
     private final WalletService wallet;
     private final AuditService audit;
+    private final store.mailstock.inventory.service.PricingService pricing;
 
     /**
      * Buying is paid instantly from the buyer's deposited balance: the balance is debited
@@ -55,7 +56,8 @@ public class OrderService {
             if (i.getStockStatus() != InventoryItem.Status.AVAILABLE)
                 throw ApiException.badRequest("Item unavailable: " + i.getTitle());
             chosen.add(i);
-            total = total.add(i.getSellingPrice());
+            BigDecimal price = resolvePrice(i);
+            total = total.add(price);
         }
 
         BigDecimal discount = BigDecimal.ZERO;
@@ -70,8 +72,9 @@ public class OrderService {
                 .discountAmount(discount).couponCode(req.couponCode())
                 .build();
         for (InventoryItem i : chosen) {
+            BigDecimal price = resolvePrice(i);
             OrderItem oi = OrderItem.builder()
-                    .inventoryId(i.getId()).title(i.getTitle()).price(i.getSellingPrice())
+                    .inventoryId(i.getId()).title(i.getTitle()).price(price)
                     // Warranty is fixed per category (set on the item at listing time) — buyer doesn't choose it.
                     .warrantyDays(i.getWarrantyDays())
                     .deliveryPayload(i.getDeliveryPayload())   // snapshot credentials at sale time
@@ -106,6 +109,15 @@ public class OrderService {
         return order;
     }
 
+    /** Resolve price: use the item's explicit override, else fetch from sell.<provider>_<category> */
+    private BigDecimal resolvePrice(InventoryItem i) {
+        if (i.getSellingPrice() != null) return i.getSellingPrice();
+        BigDecimal price = inventory.pricing.sellPrice(i.getProvider(), i.getAccountCategory());
+        if (price == null || price.signum() <= 0)
+            throw ApiException.badRequest("No price configured for " + i.getTitle());
+        return price;
+    }
+
     /**
      * Read-only checkout preview for a cart: price the (de-duplicated) items, validate a coupon if
      * given, and return the subtotal / discount / payable. Consumes nothing — safe to call as the
@@ -121,7 +133,8 @@ public class OrderService {
             InventoryItem i = inventory.get(id);
             if (i.getStockStatus() != InventoryItem.Status.AVAILABLE)
                 throw ApiException.badRequest("Item unavailable: " + i.getTitle());
-            subtotal = subtotal.add(i.getSellingPrice());
+            BigDecimal price = resolvePrice(i);
+            subtotal = subtotal.add(price);
             count++;
         }
         BigDecimal discount = BigDecimal.ZERO;
@@ -176,7 +189,7 @@ public class OrderService {
         if (i.getStockStatus() != InventoryItem.Status.AVAILABLE)
             throw ApiException.badRequest("Item not available: " + i.getTitle());
 
-        BigDecimal price = i.getSellingPrice();
+        BigDecimal price = resolvePrice(i);
         BigDecimal charged = req.chargeBalance() ? price : BigDecimal.ZERO;
 
         Order order = Order.builder()
@@ -220,5 +233,14 @@ public class OrderService {
                         + ",\"charged\":" + req.chargeBalance() + "}", null);
 
         return order;
+    }
+
+    /** Resolve price: use the item's explicit override, else fetch from sell.<provider>_<category> */
+    private BigDecimal resolvePrice(InventoryItem i) {
+        if (i.getSellingPrice() != null) return i.getSellingPrice();
+        BigDecimal price = pricing.sellPrice(i.getProvider(), i.getAccountCategory());
+        if (price == null || price.signum() <= 0)
+            throw ApiException.badRequest("No price configured for " + i.getTitle());
+        return price;
     }
 }
